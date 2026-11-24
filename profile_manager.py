@@ -40,6 +40,37 @@ def snapshot(source, destination):
     temporary.replace(destination)
 
 
+def locate(roots):
+    """Find the client launcher and LoloServer, tolerating one extra nesting level.
+
+    Players pick different folders: the install root, the folder holding
+    'OverField Game', or the game folder itself. Accept all of them instead of
+    failing with 'Game client not found'.
+    """
+    client = server = None
+    for base in roots:
+        if base is None:
+            continue
+        try:
+            candidates = [base] + [p for p in base.iterdir() if p.is_dir()]
+        except OSError:
+            continue
+        for folder in candidates:
+            if client is None:
+                if (folder / 'OverField Game' / 'launcher.exe').is_file():
+                    client = folder / 'OverField Game'
+                elif (folder / 'launcher.exe').is_file():
+                    client = folder
+            if server is None:
+                if (folder / 'LoloServer' / 'Lolo.exe').is_file():
+                    server = folder / 'LoloServer'
+                elif (folder / 'Lolo.exe').is_file() and (folder / 'config.json').is_file():
+                    server = folder
+        if client is not None and server is not None:
+            break
+    return client, server
+
+
 def prepare(root, base, mode, host):
     http, gate, log = MODES[mode]
     address = '127.0.0.1' if mode == 'solo' else lan_ip(host)
@@ -47,10 +78,12 @@ def prepare(root, base, mode, host):
     profile.mkdir(parents=True, exist_ok=True)
     (profile / 'logs').mkdir(exist_ok=True)
     result = {'mode': mode, 'profile': str(profile), 'host': address, 'http': http, 'gateway': gate, 'log': log, 'imported': False}
-    server = root / 'LoloServer'
-    if not (server/'Lolo.exe').exists():server=Path(__file__).with_name('server-kit')
+    located_client, located_server = locate([root, Path(__file__).resolve().parent])
+    server = located_server or (root / 'LoloServer')
     if not (server / 'Lolo.exe').is_file():
-        raise FileNotFoundError('LoloServer/Lolo.exe is missing.')
+        server = Path(__file__).with_name('server-kit')
+    if not (server / 'Lolo.exe').is_file():
+        raise FileNotFoundError('LoloServer/Lolo.exe is missing. Put the server files next to the launcher or select the folder that contains LoloServer.')
     data = profile / 'data'
     if not data.exists():
         shutil.copytree(server / 'data', data)
@@ -62,7 +95,7 @@ def prepare(root, base, mode, host):
     if not executable.exists(): shutil.copy2(server / 'Lolo.exe', executable)
     # Repair only this profile's version map; original installation is read-only.
     import repair_version
-    original_client = root/'OverField Game' if (root/'OverField Game/launcher.exe').exists() else root
+    original_client = located_client or root
     client = original_client/'launcher_Data'
     if (client/'StreamingAssets/yoo/DefaultPackage/PackageManifest_DefaultPackage.version').exists():
         program = repair_version.read_version(client / 'StreamingAssets/yoo/DefaultPackage/PackageManifest_DefaultPackage.version')
@@ -94,7 +127,9 @@ def prepare(root, base, mode, host):
 
 
 def prepare_client(root, base, mode):
-    original = root / 'OverField Game' if (root/'OverField Game/launcher.exe').exists() else root
+    original, _ = locate([root])
+    if original is None:
+        raise FileNotFoundError('Game client not found. Select the folder that contains OverField Game or launcher.exe.')
     target = base / mode / 'client'
     if (target / 'client-ready.json').exists():
         shutil.copy2(Path(__file__).with_name('LocalUidSDK.dll'),target/'launcher_Data/Plugins/x86_64/PCGameSDK.dll')

@@ -279,11 +279,43 @@ namespace OverFieldLocal
             if (r.Code != 0) throw new InvalidOperationException(r.Error.Length > 0 ? r.Error : "无法读取服务状态。");
             return new JavaScriptSerializer().Deserialize<ServiceStatus>(r.Output);
         }
+        public static string FindClient(string root)
+        {
+            if (String.IsNullOrWhiteSpace(root)) return null;
+            var direct = new[] { Path.Combine(root, "OverField Game", "launcher.exe"), Path.Combine(root, "launcher.exe") };
+            foreach (var candidate in direct) if (File.Exists(candidate)) return candidate;
+            try
+            {
+                foreach (var child in Directory.GetDirectories(root))
+                    foreach (var candidate in new[] { Path.Combine(child, "OverField Game", "launcher.exe"), Path.Combine(child, "launcher.exe") })
+                        if (File.Exists(candidate)) return candidate;
+            }
+            catch { }
+            return null;
+        }
+        public static string FindServer(string root)
+        {
+            if (!String.IsNullOrWhiteSpace(root))
+            {
+                if (File.Exists(Path.Combine(root, "LoloServer", "Lolo.exe"))) return Path.Combine(root, "LoloServer");
+                try
+                {
+                    foreach (var child in Directory.GetDirectories(root))
+                    {
+                        var nested = Path.Combine(child, "LoloServer");
+                        if (File.Exists(Path.Combine(nested, "Lolo.exe"))) return nested;
+                    }
+                }
+                catch { }
+            }
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server-kit");
+        }
         public void ValidateRoot(string root)
         {
-            string server=File.Exists(Path.Combine(root,"LoloServer","Lolo.exe"))?Path.Combine(root,"LoloServer"):Path.Combine(BaseDir,"server-kit");
+            string server = FindServer(root);
             foreach (var path in new[] { Path.Combine(server, "Lolo.exe"), Path.Combine(server, "config.json") })
-                if (!File.Exists(path)) throw new InvalidOperationException("所选目录缺少：" + path);
+                if (!File.Exists(path))
+                    throw new InvalidOperationException("所选目录缺少服务端：" + path + "\n请选择包含 LoloServer 的上层目录，或把服务端放到启动器旁边的 server-kit 文件夹。");
         }
         public Dictionary<string, object> Capture(string action, string path, uint uid, bool replace)
         {
@@ -624,7 +656,7 @@ namespace OverFieldLocal
             if (busy || checking) return;
             using (var dialog = new FolderBrowserDialog { Description = "选择游戏安装目录，单机启动时使用其中的 launcher.exe", SelectedPath = backend.Root, ShowNewFolderButton = false })
                 if (dialog.ShowDialog(this) == DialogResult.OK)
-                    try { backend.ValidateRoot(dialog.SelectedPath); backend.Root = dialog.SelectedPath; backend.Save(); rootPath.Text = backend.Root; Append("游戏目录已保存。"); await RefreshStatus(); }
+                    try { backend.ValidateRoot(dialog.SelectedPath); if (Backend.FindClient(dialog.SelectedPath) == null) throw new InvalidOperationException("所选目录里没有找到游戏客户端 launcher.exe。\n请选择包含 OverField Game 或 launcher.exe 的目录。"); backend.Root = dialog.SelectedPath; backend.Save(); rootPath.Text = backend.Root; Append("游戏目录已保存。"); await RefreshStatus(); }
                     catch (Exception ex) { Append(ex.Message); MessageBox.Show(this, ex.Message, "目录不可用", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
         async Task Verify()

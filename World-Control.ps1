@@ -18,7 +18,21 @@ $taskRegistry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settin
 $taskProfile = Join-Path $taskBase $Mode
 $taskExecutable = Join-Path $taskProfile 'server\Lolo.exe'
 $taskClient = Join-Path $taskProfile 'client\launcher.exe'
-$taskOriginalClient=if(Test-Path -LiteralPath (Join-Path $GameRoot 'launcher.exe')) { Join-Path $GameRoot 'launcher.exe' } else { Join-Path $GameRoot 'OverField Game\launcher.exe' }
+function Find-Client([string]$Base) {
+    if ([string]::IsNullOrWhiteSpace($Base)) { return $null }
+    foreach ($candidate in @(
+        (Join-Path $Base 'launcher.exe'),
+        (Join-Path $Base 'OverField Game\launcher.exe')
+    )) { if (Test-Path -LiteralPath $candidate) { return $candidate } }
+    foreach ($child in (Get-ChildItem -LiteralPath $Base -Directory -ErrorAction SilentlyContinue)) {
+        foreach ($candidate in @(
+            (Join-Path $child.FullName 'launcher.exe'),
+            (Join-Path $child.FullName 'OverField Game\launcher.exe')
+        )) { if (Test-Path -LiteralPath $candidate) { return $candidate } }
+    }
+    return $null
+}
+$taskOriginalClient = Find-Client $GameRoot
 $taskTarget = if ($Mode -eq 'solo') { '127.0.0.1' } else { $HostAddress }
 $taskHttp = if ($Mode -eq 'solo') { 18080 } else { 19080 }
 $taskGateway = if ($Mode -eq 'solo') { 18100 } else { 19100 }
