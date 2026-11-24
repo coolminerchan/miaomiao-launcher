@@ -1,4 +1,4 @@
-﻿Third-party components
+Third-party components
 
 Python 3.13.17 for Windows x64
 Python Software Foundation license and bundled notices are in tools\python\LICENSE.txt.
@@ -29,3 +29,6 @@ https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513
 
 Windows PktMon is supplied by Windows.
 https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon-syntax
+
+水音 (Shuiyin) capture tooling
+The public-server account capture workflow and part of the decode/export approach were developed with reference to capture tooling shared by 水音. Thanks for making it available to the community.
