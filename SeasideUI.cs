@@ -95,10 +95,10 @@ namespace OverFieldLocal
             side.Controls.Add(FitLabel("以自己的 UID 开始\n数据只保存在本电脑\n请勿公开私人存档",9,Theme.Muted),0,11);
 
             var scroll=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Margin=Padding.Empty,BackColor=Theme.Bg};shell.Controls.Add(scroll,1,0);
-            var layout=Grid(1,7);layout.Dock=DockStyle.Top;layout.Padding=new Padding(26,24,26,22);layout.Height=852;
+            var layout=Grid(1,8);layout.Dock=DockStyle.Top;layout.Padding=new Padding(26,24,26,22);layout.Height=970;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int height in new[]{160,96,80,162,128,146,34})layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
-            scroll.Controls.Add(layout);scroll.Resize+=delegate{layout.Height=Math.Max(852,scroll.ClientSize.Height);};
+            foreach(int height in new[]{160,96,80,162,128,118,146,34})layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+            scroll.Controls.Add(layout);scroll.Resize+=delegate{layout.Height=Math.Max(970,scroll.ClientSize.Height);};
 
             var hero=new SeasideHero{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,18),Padding=new Padding(24,14,24,16)};
             var heroGrid=Grid(2,3);heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,64));heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,36));
@@ -131,12 +131,24 @@ namespace OverFieldLocal
             profileLabel.Dock=DockStyle.Fill;profileLabel.AutoEllipsis=true;profileLabel.Font=Theme.Font(9);profileLabel.ForeColor=Theme.Muted;profileLabel.TextAlign=ContentAlignment.MiddleLeft;profileLabel.Margin=Padding.Empty;dataRows.Controls.Add(profileLabel,0,0);
             var dataActions=Grid(4,1);for(int i=0;i<4;i++)dataActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=0;foreach(var b in new[]{importData,backupData,openData,firewall}){SpaceButton(b,index==3);dataActions.Controls.Add(b,index++,0);}dataRows.Controls.Add(dataActions,0,1);layout.Controls.Add(dataPanel,0,4);
 
+            var capturePanel=new Surface{Dock=DockStyle.Fill,Padding=new Padding(20,12,20,14),Margin=new Padding(0,0,0,18)};
+            var captureRows=Grid(1,3);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            foreach(int h in new[]{28,46,52})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePanel.Controls.Add(captureRows);
+            captureRows.Controls.Add(FitLabel("公服账号采集",10,Theme.Text,FontStyle.Bold),0,0);
+            captureHint.Dock=DockStyle.Fill;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(8.5f);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.MiddleLeft;captureHint.Margin=Padding.Empty;
+            captureHint.Text="先点「启动公服采集」，再用自己的渠道账号登录官方客户端；进入游戏并打开要保存的界面后点「结束采集」，数据会直接写入当前模式的账号库。";
+            captureRows.Controls.Add(captureHint,0,1);
+            var captureActions=Grid(2,1);for(int i=0;i<2;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
+            SpaceButton(captureStart);SpaceButton(captureStop,true);
+            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,1,0);
+            captureRows.Controls.Add(captureActions,0,2);layout.Controls.Add(capturePanel,0,5);
+
             var logPanel=new Surface{Dock=DockStyle.Fill,Margin=Padding.Empty,Padding=new Padding(20,12,20,14)};
             var logRows=Grid(1,2);logRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));logRows.RowStyles.Add(new RowStyle(SizeType.Absolute,30));logRows.RowStyles.Add(new RowStyle(SizeType.Percent,100));logPanel.Controls.Add(logRows);
             var logHead=Grid(2,1);logHead.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));logHead.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,160));logHead.Controls.Add(FitLabel("运行记录",10,Theme.Text,FontStyle.Bold),0,0);
             var openLogs=new LinkLabel{Text="打开日志文件夹",LinkColor=Theme.Muted,ActiveLinkColor=Theme.Accent,VisitedLinkColor=Theme.Muted,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleRight,AutoSize=false};openLogs.LinkClicked+=delegate{OpenFolder(Path.Combine(backend.ProfilePath,"logs"));};logHead.Controls.Add(openLogs,1,0);logRows.Controls.Add(logHead,0,0);
-            logs.Dock=DockStyle.Fill;logs.ReadOnly=true;logs.BackColor=Theme.Panel;logs.ForeColor=Theme.Muted;logs.BorderStyle=BorderStyle.None;logs.Font=Theme.Font(9);logs.DetectUrls=false;logs.ScrollBars=RichTextBoxScrollBars.Vertical;logs.Margin=new Padding(0,4,0,0);logRows.Controls.Add(logs,0,1);layout.Controls.Add(logPanel,0,5);
-            footer.Text="游戏与服务独立运行  ·  单机 / 联机存档分开保存";footer.ForeColor=Theme.Muted;footer.Font=Theme.Font(8.5f);footer.Dock=DockStyle.Fill;footer.AutoEllipsis=true;footer.TextAlign=ContentAlignment.BottomLeft;footer.Margin=Padding.Empty;layout.Controls.Add(footer,0,6);
+            logs.Dock=DockStyle.Fill;logs.ReadOnly=true;logs.BackColor=Theme.Panel;logs.ForeColor=Theme.Muted;logs.BorderStyle=BorderStyle.None;logs.Font=Theme.Font(9);logs.DetectUrls=false;logs.ScrollBars=RichTextBoxScrollBars.Vertical;logs.Margin=new Padding(0,4,0,0);logRows.Controls.Add(logs,0,1);layout.Controls.Add(logPanel,0,6);
+            footer.Text="游戏与服务独立运行  ·  单机 / 联机存档分开保存";footer.ForeColor=Theme.Muted;footer.Font=Theme.Font(8.5f);footer.Dock=DockStyle.Fill;footer.AutoEllipsis=true;footer.TextAlign=ContentAlignment.BottomLeft;footer.Margin=Padding.Empty;layout.Controls.Add(footer,0,7);
         }
     }
 }

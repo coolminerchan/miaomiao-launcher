@@ -2,16 +2,21 @@
 param(
     [ValidateSet('Account', 'Gardens')]
     [string]$Mode = 'Account',
-    [string]$OutDir = (Join-Path $PSScriptRoot 'output'),
+    [string]$OutDir,
     [ValidateRange(1, 65535)]
     [int[]]$Ports = @(11001, 11002, 11003, 11004, 21001, 21002),
     [ValidateRange(0, 3600)]
     [int]$AutoStopSeconds = 0,
+    [switch]$CleanupOnly,
+    [string]$StopFlag,
     [string]$PythonExe,
     [string]$TSharkExe
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('OutDir')) {
+    $OutDir = Join-Path $PSScriptRoot 'output'
+}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $user = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $user.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -22,15 +27,18 @@ $python = if ($PythonExe) { $PythonExe } elseif ($env:OVERFIELD_BACKUP_PYTHON) {
 $tshark = if ($TSharkExe) { $TSharkExe } elseif ($env:OVERFIELD_TSHARK) { $env:OVERFIELD_TSHARK } else { Join-Path $PSScriptRoot 'tools\tshark\tshark.exe' }
 $env:OVERFIELD_TSHARK = $tshark
 $pktmon = Join-Path $env:SystemRoot 'System32\PktMon.exe'
-foreach ($program in @($python, $tshark, $pktmon)) {
+$programs = if ($CleanupOnly) { $pktmon } else { $python, $tshark, $pktmon }
+foreach ($program in $programs) {
     if (-not (Test-Path -LiteralPath $program -PathType Leaf)) {
         throw "找不到 $program 。请先完整解压工具包，并在支持 PktMon 的 Windows 上运行。"
     }
 }
-& $python -B -c 'import cramjam, google.protobuf'
-if ($LASTEXITCODE -ne 0) { throw '内置 Python 依赖加载失败，请重新解压工具包。' }
-& $tshark --version | Out-Null
-if ($LASTEXITCODE -ne 0) { throw '内置 TShark 无法启动，请检查是否完整解压。' }
+if (-not $CleanupOnly) {
+    & $python -B -c 'import cramjam, google.protobuf'
+    if ($LASTEXITCODE -ne 0) { throw '内置 Python 依赖加载失败，请重新解压工具包。' }
+    & $tshark --version | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw '内置 TShark 无法启动，请检查是否完整解压。' }
+}
 
 function Invoke-PacketMonitor([string[]]$CommandArgs) {
     $result = & $pktmon @CommandArgs
@@ -38,6 +46,47 @@ function Invoke-PacketMonitor([string[]]$CommandArgs) {
         throw "PktMon $($CommandArgs[0]) 失败（退出码 $LASTEXITCODE）。$($result -join ' ')"
     }
     $result
+}
+
+function Get-PacketMonitorFilterState {
+    $lines = @(Invoke-PacketMonitor @('filter', 'list'))
+    $rows = @($lines | Where-Object { $_ -match '^\s*\d' })
+    if ($rows.Count -eq 0 -and ($lines -join "`n") -match '(?im)^\s*(none|无|無|no (packet )?filters( configured)?)\s*[.。]?\s*$') {
+        return 'Empty'
+    }
+    if ($rows.Count -gt 0 -and @($rows -notmatch '^\s*\d+\s+OFBackup_(\d{1,5})\s+TCP\s+\1\s*$').Count -eq 0) {
+        return 'Backup'
+    }
+    return 'Other'
+}
+
+function Remove-BackupFilters {
+    switch (Get-PacketMonitorFilterState) {
+        'Backup' { Invoke-PacketMonitor @('filter', 'remove') | Out-Null }
+        'Other' { throw '发现其他 PktMon 筛选器，或筛选器格式无法识别。请先在对应的诊断工具中清理。' }
+    }
+}
+
+function Clear-PreviousBackupCapture {
+    $status = (Invoke-PacketMonitor @('status')) -join [Environment]::NewLine
+    $idlePattern = '(?im)^\s*(?:Packet\s+Monitor\s+is\s+not\s+running|数据包监视器\s*(?:没有|未在|未)运行|' +
+        '封包監視器\s*(?:未|未在|沒有)(?:執行|運行))[.。]?\s*$'
+    if ($status -notmatch $idlePattern) {
+        $backupLogPattern = '(?im)^[^:：\r\n]+[:：][ \t]*"?' +
+            '(?<etl>(?:[a-z]:|\\\\[^\\\r\n]+\\[^\\\r\n]+)(?:\\[^\\\r\n"]+)*' +
+            '\\(?:account|gardens)_\d{8}_\d{6}_\d{3}\\capture\.etl)"?[ \t]*\r?$'
+        $logMatch = [regex]::Match($status, $backupLogPattern)
+        if (-not $logMatch.Success -or (Get-PacketMonitorFilterState) -ne 'Backup') {
+            throw "无法确认 PktMon 会话属于本备份工具。请在原诊断窗口结束会话。当前状态 $status"
+        }
+        $previousEtl = $logMatch.Groups['etl'].Value
+        if (-not (Test-Path -LiteralPath $previousEtl -PathType Leaf)) {
+            throw "无法验证上一轮抓包文件 $previousEtl 。请先检查 PktMon 会话。"
+        }
+        Invoke-PacketMonitor @('stop') | Out-Null
+        Write-Host "已停止上一轮备份抓包。原始文件保存在 $previousEtl"
+    }
+    Remove-BackupFilters
 }
 
 $prefix = if ($Mode -eq 'Account') { 'account' } else { 'gardens' }
@@ -56,13 +105,10 @@ try {
     catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (-not $ownsMutex) { throw '另一个备份窗口正在抓包，请在那个窗口先按回车结束。' }
 
-    $status = (Invoke-PacketMonitor @('status')) -join [Environment]::NewLine
-    if ($status -notmatch '(?i)Packet\s+Monitor\s+is\s+not\s+running|数据包监视器\s*没有运行|封包監視器\s*(未執行|未在執行|未運行|沒有執行|沒有運行)') {
-        throw "无法确认 PktMon 空闲。请先结束其他 PktMon 会话。当前状态 $status"
-    }
-    $filters = (Invoke-PacketMonitor @('filter', 'list')) -join [Environment]::NewLine
-    if ($filters -notmatch '(?im)^\s*(none|无|無|no (packet )?filters( configured)?)\s*[.。]?\s*$') {
-        throw "已有 PktMon 筛选器，或系统语言的输出无法识别。工具保留了现有筛选器。$filters"
+    Clear-PreviousBackupCapture
+    if ($CleanupOnly) {
+        Write-Host 'PktMon 已空闲。'
+        return
     }
 
     New-Item -ItemType Directory -Path $sessionPath | Out-Null
@@ -82,17 +128,19 @@ try {
         Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
     }
     if ($AutoStopSeconds -gt 0) { Start-Sleep -Seconds $AutoStopSeconds }
+    elseif ($StopFlag) {
+        $deadline = (Get-Date).AddHours(4)
+        while (-not (Test-Path -LiteralPath $StopFlag) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+        if (-not (Test-Path -LiteralPath $StopFlag)) { Write-Host '等待结束信号超时，按正常流程收尾。' }
+    }
     else { [void](Read-Host '操作完毕后，回到本窗口按回车') }
 } finally {
     try {
         if ($started) { Invoke-PacketMonitor @('stop') | Out-Null }
+        if ($filtersAdded) { Remove-BackupFilters }
     } finally {
-        try {
-            if ($filtersAdded) { Invoke-PacketMonitor @('filter', 'remove') | Out-Null }
-        } finally {
-            if ($ownsMutex) { $mutex.ReleaseMutex() }
-            $mutex.Dispose()
-        }
+        if ($ownsMutex) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
     }
 }
 

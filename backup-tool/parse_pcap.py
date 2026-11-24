@@ -11,7 +11,7 @@ OverField (开放空间) 官服 TCP 抓包无损解包与玩家数据完整性�
    - raw/*.bin  : 导出的 Protobuf 二进制。
    - json/*.json: 基于 net_pb2 解码出的可读 JSON。
    - 已知登录请求跳过，登录响应去除日志令牌。
-5. 生成 summary.json 与终端核对清单，明确提示哪些关键玩家数据包已抓到 / 尚未抓到。
+5. 生成 summary.json、按 UID 归档的 ZIP 与终端核对清单。
 """
 
 from __future__ import annotations
@@ -19,22 +19,23 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import re
 import struct
 import subprocess
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from tempfile import NamedTemporaryFile
+from typing import Dict, Iterable, List, Optional, Tuple
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import cramjam
 from google.protobuf import json_format
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROTO_DIR = SCRIPT_DIR / "proto_gen"
-TSHARK = os.environ.get("OVERFIELD_TSHARK") or str(SCRIPT_DIR / "tools" / "tshark" / "tshark.exe")
+TSHARK = str(SCRIPT_DIR / "tools" / "tshark" / "tshark.exe")
 sys.path.insert(0, str(PROTO_DIR))
 
 import net_pb2  # type: ignore  # noqa: E402
@@ -42,11 +43,13 @@ import net_pb2  # type: ignore  # noqa: E402
 HEADER_STRUCT = struct.Struct(">H")
 GAME_PORTS = {"11001", "11002", "11003", "11004", "21001", "21002"}
 LOGIN_REQUEST_IDS = {1001, 1003, 2201}
+SCENE_DATA_NOTICE_ID = 1016
+GARDEN_SCENE_NOTICE_IDS = {1696, 1698, 2614, 2628}
 
 # 关键玩家数据核对项：(显示名, 匹配的消息名关键字列表)
 CHECKLIST_GROUPS: List[Tuple[str, List[str]]] = [
-    ("登录响应 (UID/基础信息)", ["PlayerLoginRsp"]),
-    ("主数据 (等级/角色/任务/外观)", ["PlayerMainDataRsp"]),
+    ("登录响应 (基础信息)", ["PlayerLoginRsp"]),
+    ("主数据 (UID/等级/角色/任务/外观)", ["PlayerMainDataRsp"]),
     ("背包与物品推送", ["PackNotice", "GetAllCharacterEquipRsp"]),
     ("武器与护甲", ["GetWeaponRsp", "GetArmorRsp"]),
     ("宠物本体列表", ["GetPetRsp"]),
@@ -208,6 +211,103 @@ def decode_proto_body(msg_name: str, body: bytes) -> Tuple[Optional[dict], Optio
         return None, str(e)
 
 
+def safe_player_name(name: str) -> str:
+    return re.sub(r'[\\/:*?"<>|\s\x00-\x1f]+', "_", name).strip("_.")[:40] or "未知玩家"
+
+
+def write_zip(path: Path, files: Iterable[Path]) -> None:
+    with NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        with ZipFile(temporary_path, "w", compression=ZIP_DEFLATED) as archive:
+            for file in files:
+                archive.write(file, file.relative_to(path.parent))
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def collect_garden_scene(
+    scene: net_pb2.SceneData,
+    layouts: dict[int, net_pb2.SceneGardenData],
+    names: dict[int, str],
+) -> Optional[int]:
+    has_layout = scene.HasField("scene_garden_data")
+    if scene.scene_id != 9999 and not has_layout:
+        return None
+    for player in scene.players:
+        if player.player_id and player.player_name:
+            names.setdefault(player.player_id, player.player_name)
+    owner_uid = scene.channel_id or scene.channel_label
+    if owner_uid and has_layout:
+        layout = scene.scene_garden_data
+        previous = layouts.get(owner_uid)
+        if previous is None or len(layout.garden_furniture_info_map) >= len(previous.garden_furniture_info_map):
+            layouts[owner_uid] = layout
+    return owner_uid
+
+
+def separate_garden_packets(
+    out_dir: Path, packet_stems: dict[int, list[str]], account_uid: Optional[int]
+) -> dict[int, list[Path]]:
+    separated: dict[int, list[Path]] = defaultdict(list)
+    for owner_uid, stems in packet_stems.items():
+        if owner_uid == account_uid:
+            continue
+        garden_dir = out_dir / "gardens" / (str(owner_uid) if owner_uid else "unknown")
+        for kind, suffix in (("raw", ".bin"), ("json", ".json")):
+            destination = garden_dir / kind
+            destination.mkdir(parents=True, exist_ok=True)
+            for stem in stems:
+                source = out_dir / kind / (stem + suffix)
+                if source.is_file():
+                    separated[owner_uid].append(source.rename(destination / source.name))
+    return separated
+
+
+def write_garden_backups(
+    out_dir: Path,
+    layouts: dict[int, net_pb2.SceneGardenData],
+    names: dict[int, str],
+    packet_files: Optional[dict[int, list[Path]]] = None,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    packet_files = packet_files or {}
+    index = []
+    for owner_uid in sorted((layouts.keys() | packet_files.keys()) - {0}):
+        owner_name = names.get(owner_uid, "未知玩家")
+        safe_name = safe_player_name(owner_name)
+        zip_path = out_dir / f"garden_{safe_name}_{owner_uid}.zip"
+        meta = {"owner_uid": owner_uid, "owner_name": owner_name, "scene_id": 9999, "zip_file": zip_path.name}
+        files = list(packet_files.get(owner_uid, []))
+        layout = layouts.get(owner_uid)
+        if layout is not None:
+            furniture_count = len(layout.garden_furniture_info_map)
+            stem = f"garden_{owner_uid}_{safe_name}_{furniture_count}items"
+            bin_path = out_dir / f"{stem}.bin"
+            json_path = out_dir / f"{stem}.json"
+            meta.update(
+                furniture_count=furniture_count,
+                likes_num=layout.likes_num,
+                access_player_num=layout.access_player_num,
+                bin_file=bin_path.name,
+                json_file=json_path.name,
+            )
+            bin_path.write_bytes(layout.SerializeToString())
+            readable = json_format.MessageToDict(layout, preserving_proto_field_name=True)
+            readable["_meta"] = meta
+            json_path.write_text(json.dumps(readable, ensure_ascii=False, indent=2), encoding="utf-8")
+            files.extend((bin_path, json_path))
+        write_zip(zip_path, files)
+        index.append(meta)
+        print(f"已保存家园 ZIP {zip_path}")
+    (out_dir / "gardens_index.json").write_text(
+        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if packet_files.get(0):
+        print(f"[注意] 无法确认屋主 UID 的场景数据留在 {out_dir / 'unknown'}")
+
+
 def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     cmd_map = load_cmd_map()
     raw_dir = out_dir / "raw"
@@ -224,8 +324,12 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     msg_names_seen: Counter = Counter()
     unknown_ids: Counter = Counter()
     decode_errors: List[dict] = []
+    observed_player_uids: set[int] = set()
     player_highlights: dict = {}
     stream_summaries: List[dict] = []
+    garden_layouts: dict[int, net_pb2.SceneGardenData] = {}
+    player_names: dict[int, str] = {}
+    garden_packets: dict[int, list[str]] = defaultdict(list)
 
     for sid in streams:
         node0, node1, b01, b10 = extract_tcp_stream_directions(pcap_path, sid)
@@ -250,6 +354,7 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
             if not pkts:
                 continue
             stream_pkt_total += len(pkts)
+            current_garden_uid = 0
 
             for pkt in pkts:
                 global_seq += 1
@@ -270,6 +375,11 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
                     decode_errors.append({"seq": global_seq, "msg": msg_name, "err": pkt["decompress_err"]})
                     if msg_id != 1004:
                         (raw_dir / f"{stem}.bin").write_bytes(body)
+                    if msg_id == SCENE_DATA_NOTICE_ID:
+                        current_garden_uid = 0
+                        garden_packets[0].append(stem)
+                    elif msg_id in GARDEN_SCENE_NOTICE_IDS:
+                        garden_packets[current_garden_uid].append(stem)
                     continue
 
                 if msg_id == 1004:
@@ -285,14 +395,30 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
 
                 (raw_dir / f"{stem}.bin").write_bytes(body)
                 decoded, err = decode_proto_body(msg_name, body)
+                if msg_id == SCENE_DATA_NOTICE_ID:
+                    garden_uid = 0
+                    if decoded is not None:
+                        scene = net_pb2.SceneDataNotice.FromString(body).data
+                        garden_uid = collect_garden_scene(scene, garden_layouts, player_names)
+                    current_garden_uid = garden_uid or 0
+                    if garden_uid is not None:
+                        garden_packets[garden_uid].append(stem)
+                elif msg_id in GARDEN_SCENE_NOTICE_IDS:
+                    garden_packets[current_garden_uid].append(stem)
                 if decoded is not None:
                     (json_dir / f"{stem}.json").write_text(
                         json.dumps(decoded, ensure_ascii=False, indent=2), encoding="utf-8"
                     )
                     # 提取核心玩家摘要
                     if msg_name == "PlayerMainDataRsp":
-                        player_highlights["player_id"] = decoded.get("player_id")
-                        player_highlights["player_name"] = decoded.get("player_name")
+                        player_uid = decoded.get("player_id", 0)
+                        if player_uid <= 0:
+                            continue
+                        observed_player_uids.add(player_uid)
+                        if decoded.get("player_name"):
+                            player_names[player_uid] = decoded["player_name"]
+                        player_highlights["player_id"] = player_uid
+                        player_highlights["player_name"] = player_names.get(player_uid)
                         player_highlights["level"] = decoded.get("level")
                         player_highlights["world_level"] = decoded.get("world_level")
                         player_highlights["character_count"] = len(decoded.get("characters", []))
@@ -311,32 +437,55 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
                 {"stream_id": sid, "node0": node0, "node1": node1, "packets": stream_pkt_total}
             )
 
+    player_uids = sorted(observed_player_uids)
+    account_uid = player_uids[0] if len(player_uids) == 1 else None
+    separated = separate_garden_packets(out_dir, garden_packets, account_uid)
+    if separated:
+        garden_layouts.pop(account_uid, None)
+        write_garden_backups(out_dir / "gardens", garden_layouts, player_names, separated)
+
     summary = {
         "pcap_file": str(pcap_path),
         "total_packets": global_seq,
         "game_streams": stream_summaries,
-        "player_highlights": player_highlights,
+        "player_uids": player_uids,
+        "player_highlights": player_highlights if len(player_uids) <= 1 else {},
         "message_counts": dict(msg_names_seen.most_common()),
         "unknown_msg_ids": dict(unknown_ids),
         "decode_fallback_count": len(decode_errors),
         "omitted_login_requests": omitted_login_requests,
         "sanitized_login_responses": sanitized_login_responses,
+        "separate_garden_uids": sorted(separated.keys() - {0}),
     }
-    (out_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    summary_path = out_dir / "summary.json"
+    if account_uid is not None:
+        name = player_names.get(account_uid, "未知玩家")
+        player_highlights["player_name"] = name
+        account_zip = out_dir / f"account_{safe_player_name(name)}_{account_uid}.zip"
+        summary["account_zip"] = account_zip.name
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    if account_uid is not None:
+        files = [summary_path, *sorted(raw_dir.glob("*.bin")), *sorted(json_dir.glob("*.json"))]
+        write_zip(account_zip, files)
+        print(f"已保存账号 ZIP {account_zip}")
 
     print("\n" + "=" * 60)
     print(f"解包完成！共解析出 {global_seq} 个游戏协议包")
     print(f"输出目录: {out_dir}")
     print("=" * 60)
 
-    if player_highlights:
+    if len(player_uids) > 1:
+        uid_list = "、".join(str(uid) for uid in player_uids)
+        print(
+            f"\n[注意] 本次备份包含多个玩家 UID（{uid_list}），已保留解包结果。"
+            "请按账号分别备份以生成账号 ZIP。"
+        )
+    elif player_uids:
         print("\n【核心账号信息已捕获】")
         for k, v in player_highlights.items():
             print(f"  - {k}: {v}")
     else:
-        print("\n[注意] 尚未抓到 PlayerMainDataRsp (1006)！请确认抓包期间是否重新登录了游戏。")
+        print("\n[注意] 尚未从 PlayerMainDataRsp (1006) 取得玩家 UID。请确认抓包期间是否重新登录并进入场景。")
 
     if global_seq == 0:
         print("[注意] 未识别到游戏协议包。请确认在抓包开始后重新登录并进入官服场景。")

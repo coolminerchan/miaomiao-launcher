@@ -317,6 +317,46 @@ namespace OverFieldLocal
                 if (!File.Exists(path))
                     throw new InvalidOperationException("所选目录缺少服务端：" + path + "\n请选择包含 LoloServer 的上层目录，或把服务端放到启动器旁边的 server-kit 文件夹。");
         }
+        public Dictionary<string, object> Official(string action, string extra = "")
+        {
+            string script = Path.Combine(BaseDir, "official_capture.py");
+            if (!File.Exists(script)) throw new InvalidOperationException("缺少 official_capture.py，请重新解压完整工具包。");
+            var arguments = "-X utf8 " + Quote(script) + " " + action + extra;
+            var result = Execute(Python, arguments);
+            if (result.Code != 0)
+            {
+                string message = result.Error.Length > 0 ? result.Error : result.Output;
+                try
+                {
+                    var parsed = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(message);
+                    if (parsed.ContainsKey("error")) message = Convert.ToString(parsed["error"]);
+                }
+                catch { }
+                throw new InvalidOperationException(message.Length > 0 ? message : "公服采集操作失败。");
+            }
+            return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(result.Output);
+        }
+        public Dictionary<string, object> OfficialImport(string action, string accountZip, uint uid, bool replace)
+        {
+            string script = Path.Combine(BaseDir, "official_import.py");
+            if (!File.Exists(script)) throw new InvalidOperationException("缺少 official_import.py，请重新解压完整工具包。");
+            var arguments = "-X utf8 " + Quote(script) + " " + action + " --file " + Quote(accountZip) + " --database " + Quote(Path.Combine(ProfilePath, "db", "lolo.db"));
+            if (uid > 0) arguments += " --uid " + uid;
+            if (replace) arguments += " --replace";
+            var result = Execute(Python, arguments);
+            if (result.Code != 0)
+            {
+                string message = result.Error.Length > 0 ? result.Error : result.Output;
+                try
+                {
+                    var parsed = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(message);
+                    if (parsed.ContainsKey("error")) message = Convert.ToString(parsed["error"]);
+                }
+                catch { }
+                throw new InvalidOperationException(message.Length > 0 ? message : "账号入库失败。");
+            }
+            return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(result.Output);
+        }
         public Dictionary<string, object> Capture(string action, string path, uint uid, bool replace)
         {
             string arguments = "-X utf8 " + Quote(Path.Combine(BaseDir, "capture_import.py")) + " " + action + " --file " + Quote(path) + " --profile " + Quote(ProfilePath) + " --uid " + uid.ToString();
@@ -348,6 +388,8 @@ namespace OverFieldLocal
         readonly Backend backend = new Backend();
         readonly StatusTile server = new StatusTile("服务端"), gateway = new StatusTile("游戏网关"), proxy = new StatusTile("游戏连接");
         readonly ActionButton start = new ActionButton("启动游戏  →", true), services = new ActionButton("启动服务"), stop = new ActionButton("停止服务"), browse = new ActionButton("更改目录");
+        readonly ActionButton captureStart = new ActionButton("启动公服采集"), captureStop = new ActionButton("结束采集");
+        readonly Label captureHint = new Label();
         readonly ActionButton soloMode = new ActionButton("单机模式"), hostMode = new ActionButton("局域网服务"), importData = new ActionButton("导入数据"), backupData = new ActionButton("备份存档"), openData = new ActionButton("数据目录"), firewall = new ActionButton("局域网权限"), roomsButton=new ActionButton("房间与玩家");
         readonly NumericUpDown uidBox = new NumericUpDown();
         readonly ComboBox hostBox = new ComboBox();
@@ -383,6 +425,57 @@ namespace OverFieldLocal
             hostMode.Click += async delegate { await SwitchMode("host"); };
             uidBox.ValueChanged += delegate { if (!busy) { backend.Uid=(uint)uidBox.Value; backend.Save(); } };
             hostBox.SelectedIndexChanged += delegate { if (!busy && backend.Mode=="host" && hostBox.SelectedItem != null) { backend.HostAddress=hostBox.SelectedItem.ToString(); backend.Save(); } };
+            captureStart.Click += async delegate
+            {
+                if (busy) return;
+                SetBusy(true, "正在开始公服采集");
+                try
+                {
+                    var result = await Task.Run(() => backend.Official("start"));
+                    Append("公服采集已开始。现在启动官方客户端，用自己的渠道账号登录并进入游戏。");
+                    if (result.ContainsKey("hint")) Append(Convert.ToString(result["hint"]));
+                    captureHint.Text = "采集中：请正常登录官方客户端并打开要保存的界面，完成后点「结束采集」。";
+                }
+                catch (Exception error) { Append(error.Message); captureHint.Text = error.Message; }
+                finally { SetBusy(false, ""); }
+            };
+            captureStop.Click += async delegate
+            {
+                if (busy) return;
+                SetBusy(true, "正在结束采集并写入账号库");
+                try
+                {
+                    var captured = await Task.Run(() => backend.Official("stop"));
+                    string zip = captured.ContainsKey("accountZip") ? Convert.ToString(captured["accountZip"]) : "";
+                    if (String.IsNullOrWhiteSpace(zip) || !System.IO.File.Exists(zip))
+                    {
+                        Append("采集结束，但没有生成账号包。请确认登录公服后确实进入了游戏场景。");
+                        captureHint.Text = "未获得账号数据，可重新采集。";
+                        return;
+                    }
+                    uint loginUid = (uint)uidBox.Value;
+                    var review = await Task.Run(() => backend.OfficialImport("plan", zip, loginUid, false));
+                    bool conflict = review.ContainsKey("conflict") && Convert.ToBoolean(review["conflict"]);
+                    if (conflict)
+                    {
+                        string detail = review.ContainsKey("conflictWith") ? Convert.ToString(review["conflictWith"]) : "";
+                        Append("UID 冲突：" + detail + " 已有存档，未写入。请先备份该账号或换用其他 UID。");
+                        captureHint.Text = "UID 冲突，未写入数据库：" + detail;
+                        return;
+                    }
+                    string message = "即将写入账号库\nUID " + Convert.ToString(review["uid"]) +
+                        " · " + Convert.ToString(review["name"]) + "\n等级 " + Convert.ToString(review["level"]) +
+                        " · " + Convert.ToString(review["characters"]) + " 个角色\n\n确认写入？";
+                    if (MessageBox.Show(this, message, "确认入库", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                    var imported = await Task.Run(() => backend.OfficialImport("import", zip, loginUid, false));
+                    uint usedUid = Convert.ToUInt32(imported["uid"]);
+                    backend.Uid = usedUid; backend.Save(); uidBox.Value = usedUid;
+                    Append("账号已写入数据库：UID " + usedUid + "（" + Convert.ToString(imported["name"]) + "）。");
+                    captureHint.Text = "已入库：UID " + usedUid + "。可用该 UID 登录当前模式。";
+                }
+                catch (Exception error) { Append(error.Message); captureHint.Text = error.Message; }
+                finally { SetBusy(false, ""); }
+            };
             importData.Click += async delegate { await ImportCapture(); };
             backupData.Click += async delegate { await Operate("Backup", false); };
             openData.Click += delegate { OpenFolder(backend.ProfilePath); };
@@ -448,7 +541,7 @@ namespace OverFieldLocal
             var localLogin=LabelText("UID 本地登录\n\n数据保存在本电脑\n支持各自导入与备份",9,Theme.Muted); localLogin.Location=new Point(22,550); sidebar.Controls.Add(localLogin);
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(26, 22, 26, 18), ColumnCount = 1, RowCount = 8, BackColor = Theme.Bg };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            foreach (int h in new[] { 110, 84, 68, 126, 94 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, h));
+            foreach (int h in new[] { 110, 84, 68, 126, 94, 112, 104, 30 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, h));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
             shell.Controls.Add(layout,1,0);
             var hero = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = Theme.Bg };
@@ -503,8 +596,8 @@ namespace OverFieldLocal
             logHead.Controls.Add(openLogs); logHead.Resize += delegate { openLogs.Location = new Point(logHead.Width - openLogs.Width, 1); };
             openLogs.LinkClicked += delegate { OpenFolder(Path.Combine(backend.ProfilePath, "logs")); };
             logs.Dock = DockStyle.Fill; logs.ReadOnly = true; logs.BackColor = Theme.Panel; logs.ForeColor = Theme.Muted; logs.BorderStyle = BorderStyle.None; logs.Font = Theme.Font(9); logs.DetectUrls = false; logs.ScrollBars = RichTextBoxScrollBars.Vertical;
-            logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 5);
-            footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 6);
+            logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 6);
+            footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 7);
         }
         void ApplyMode()
         {

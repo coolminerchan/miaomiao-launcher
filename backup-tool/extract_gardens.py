@@ -3,21 +3,16 @@
 OverField (开放空间) 好友家园批量抓取解析与归档工具。
 
 用法：
-  1. 仅从抓包中提取所有拜访过的家园并按好友 UID 分别保存 (.bin + .json)：
+  1. 从抓包中提取拜访过的家园并按屋主 UID 分别保存：
      python extract_gardens.py <pcapng路径>
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
-
-from google.protobuf import json_format
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -26,21 +21,20 @@ sys.path.insert(0, str(SCRIPT_DIR / "proto_gen"))
 
 import net_pb2  # type: ignore  # noqa: E402
 from parse_pcap import (  # type: ignore  # noqa: E402
+    SCENE_DATA_NOTICE_ID,
+    collect_garden_scene,
     extract_tcp_stream_directions,
     list_tcp_streams,
     parse_game_stream,
+    write_garden_backups,
 )
 
 
 def extract_gardens(pcap_path: Path, out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    known_names: Dict[int, str] = {}
-
+    known_names: dict[int, str] = {}
+    layouts: dict[int, net_pb2.SceneGardenData] = {}
     streams = list_tcp_streams(pcap_path)
     print(f"[信息] 发现 {len(streams)} 条 TCP 流，正在扫描家园场景包 (SceneDataNotice / 1016)...")
-
-    # owner_uid -> (SceneGardenData bytes, SceneGardenData msg, meta dict)
-    gardens: Dict[int, Tuple[bytes, net_pb2.SceneGardenData, dict]] = {}
 
     for sid in streams:
         _, _, b01, b10 = extract_tcp_stream_directions(pcap_path, sid)
@@ -49,90 +43,19 @@ def extract_gardens(pcap_path: Path, out_dir: Path) -> None:
                 continue
             pkts, _ = parse_game_stream(payload)
             for pkt in pkts:
-                if pkt["msg_id"] != 1016 or pkt["decompress_err"]:
+                if pkt["msg_id"] != SCENE_DATA_NOTICE_ID or pkt["decompress_err"]:
                     continue
-                sdn = net_pb2.SceneDataNotice()
                 try:
-                    sdn.ParseFromString(pkt["body"])
+                    scene = net_pb2.SceneDataNotice.FromString(pkt["body"]).data
                 except Exception:
                     continue
+                collect_garden_scene(scene, layouts, known_names)
 
-                data = sdn.data
-                if data.scene_id != 9999:
-                    continue
-
-                gdata = data.scene_garden_data
-                fcount = len(gdata.garden_furniture_info_map)
-                if fcount == 0:
-                    continue
-
-                try:
-                    owner_id = int(data.channel_id or data.channel_label)
-                except (ValueError, TypeError):
-                    continue
-                if owner_id <= 0:
-                    continue
-                # 如果玩家刚好也在场景里，尝试从 players 补昵称
-                for pl in data.players:
-                    if pl.player_id and pl.player_name:
-                        known_names.setdefault(int(pl.player_id), pl.player_name)
-
-                # 同一好友如果进出多次，保留家具数最多/最新的一次
-                prev = gardens.get(owner_id)
-                if prev is None or fcount >= prev[2]["furniture_count"]:
-                    gardens[owner_id] = (
-                        gdata.SerializeToString(),
-                        gdata,
-                        {
-                            "owner_uid": owner_id,
-                            "owner_name": known_names.get(owner_id, "未知玩家"),
-                            "scene_id": int(data.scene_id),
-                            "furniture_count": fcount,
-                            "likes_num": int(gdata.likes_num),
-                            "access_player_num": int(gdata.access_player_num),
-                        },
-                    )
-
-    if not gardens:
-        print("\n[提示] 本次抓包未发现任何带家具数据的家园 (scene_id=9999)。")
-        print("       请确认抓包期间确实进入了好友的家园场景。")
-        (out_dir / "gardens_index.json").write_text("[]\n", encoding="utf-8")
-        return
-
-    index_list = []
-    for owner_id, (raw_bytes, gdata, meta) in sorted(gardens.items()):
-        safe_name = re.sub(r'[\\/:*?"<>|\s]+', "_", meta["owner_name"]).strip("_.")[:40] or "unknown"
-        stem = f"garden_{owner_id}_{safe_name}_{meta['furniture_count']}items"
-
-        # 1. 保存无损 SceneGardenData Protobuf 二进制
-        bin_path = out_dir / f"{stem}.bin"
-        bin_path.write_bytes(raw_bytes)
-
-        # 2. 保存可读 JSON
-        json_path = out_dir / f"{stem}.json"
-        gdict = json_format.MessageToDict(
-            gdata, preserving_proto_field_name=True, always_print_fields_with_no_presence=False
-        )
-        gdict["_meta"] = meta
-        json_path.write_text(json.dumps(gdict, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        meta["bin_file"] = bin_path.name
-        meta["json_file"] = json_path.name
-        index_list.append(meta)
-
-    (out_dir / "gardens_index.json").write_text(
-        json.dumps(index_list, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    print("\n" + "=" * 60)
-    print(f"好友家园提取完成！共保存 {len(gardens)} 个家园配置")
-    print(f"保存目录: {out_dir}")
-    print("=" * 60)
-    for m in index_list:
-        print(
-            f"  - UID {m['owner_uid']} ({m['owner_name']}): "
-            f"{m['furniture_count']} 件家具 | 点赞 {m['likes_num']} | 访客 {m['access_player_num']}"
-        )
+    write_garden_backups(out_dir, layouts, known_names)
+    if layouts:
+        print(f"好友家园提取完成，共保存 {len(layouts)} 个家园配置。")
+    else:
+        print("[提示] 本次抓包未发现可归档的家园布局。请进入好友家园并等待家具加载。")
 
 
 def main() -> None:
