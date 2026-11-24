@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.2")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.3")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 
@@ -368,13 +368,14 @@ namespace OverFieldLocal
             }
             return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(result.Output);
         }
-        public Dictionary<string, object> OfficialImport(string action, string accountZip, uint uid, bool replace)
+        public Dictionary<string, object> OfficialImport(string action, string accountZip, uint uid, bool replace, bool allowIncomplete = false)
         {
             string script = Path.Combine(BaseDir, "official_import.py");
             if (!File.Exists(script)) throw new InvalidOperationException("缺少 official_import.py，请重新解压完整工具包。");
             var arguments = "-X utf8 " + Quote(script) + " " + action + " --file " + Quote(accountZip) + " --database " + Quote(Path.Combine(ProfilePath, "db", "lolo.db"));
             if (uid > 0) arguments += " --uid " + uid;
             if (replace) arguments += " --replace";
+            if (allowIncomplete) arguments += " --allow-incomplete";
             var result = Execute(Python, arguments);
             if (result.Code != 0)
             {
@@ -524,10 +525,19 @@ namespace OverFieldLocal
                     string message = "账号 ZIP 已保存交付。是否同时写入本机账号库？\nUID " + Convert.ToString(review["uid"]) +
                         " · " + Convert.ToString(review["name"]) + "\n等级 " + Convert.ToString(review["level"]) +
                         " · " + Convert.ToString(review["characters"]) + " 个角色\n\n确认写入？";
-                    if (MessageBox.Show(this, message, "确认入库", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                    bool incomplete = review.ContainsKey("quality") && Convert.ToBoolean(((Dictionary<string, object>)review["quality"])["incomplete"]);
+                    if (incomplete)
+                    {
+                        var quality = (Dictionary<string, object>)review["quality"];
+                        string detail = "占位字段 " + (Convert.ToInt32(quality["placeholderFields"]) + Convert.ToInt32(quality["characterPlaceholderFields"]))
+                            + " 个，装备响应 " + Convert.ToString(quality["equipmentResponses"]) + " 条";
+                        message = "这个包的解码不完整（" + detail + "）。\n导入后外观与装备可能为空，但账号、等级、角色会写入。\n\n仍要导入吗？";
+                        Append("注意：包体解码不完整，装备与外观可能为空。");
+                    }
+                    if (MessageBox.Show(this, message, incomplete ? "数据不完整，确认导入" : "确认入库", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
                     if(!File.Exists(Path.Combine(backend.ProfilePath,"db","lolo.db")))
                         await Task.Run(() => backend.PrepareProfile());
-                    var imported = await Task.Run(() => backend.OfficialImport("import", zip, loginUid, false));
+                    var imported = await Task.Run(() => backend.OfficialImport("import", zip, loginUid, false, incomplete));
                     uint usedUid = Convert.ToUInt32(imported["uid"]);
                     backend.Uid = usedUid; backend.Save(); uidBox.Value = usedUid;
                     Append("账号已写入数据库：UID " + usedUid + "（" + Convert.ToString(imported["name"]) + "）。");

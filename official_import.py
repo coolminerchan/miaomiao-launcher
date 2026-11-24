@@ -130,10 +130,11 @@ def plan(path: Path, database: Path, login_uid: int | None) -> dict:
         "conflict": conflict,
         "conflictWith": describe(database, uid) if conflict else "",
         "existingUids": existing_uids(database),
+        "quality": capture_import.capture_quality(player, entries),
     }
 
 
-def import_account(path: Path, database: Path, login_uid: int | None, replace: bool = False) -> dict:
+def import_account(path: Path, database: Path, login_uid: int | None, replace: bool = False, allow_incomplete: bool = False) -> dict:
     reviewed = plan(path, database, login_uid)
     if reviewed["conflict"] and not replace:
         raise ValueError(
@@ -157,7 +158,7 @@ def import_account(path: Path, database: Path, login_uid: int | None, replace: b
                         out.writestr("export/" + item.filename[len(prefix):], archive.read(item))
         finally:
             archive.close()
-        result = capture_import.import_capture(flat, database.parent.parent, uid, replace=replace)
+        result = capture_import.import_capture(flat, database.parent.parent, uid, replace=replace, allow_incomplete=allow_incomplete)
 
     result.update(
         uid=uid,
@@ -176,6 +177,7 @@ def main() -> int:
     parser.add_argument("--database", type=Path, required=True, help="profiles/<mode>/db/lolo.db")
     parser.add_argument("--uid", type=int, default=0, help="UID to create when the capture has none")
     parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--allow-incomplete", action="store_true")
     args = parser.parse_args()
 
     database = args.database.resolve()
@@ -183,7 +185,7 @@ def main() -> int:
         if args.action == "plan":
             result = plan(args.file.resolve(), database, args.uid or None)
         else:
-            result = import_account(args.file.resolve(), database, args.uid or None, args.replace)
+            result = import_account(args.file.resolve(), database, args.uid or None, args.replace, args.allow_incomplete)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, zipfile.BadZipFile, sqlite3.Error) as error:
