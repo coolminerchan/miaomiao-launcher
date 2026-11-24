@@ -1,9 +1,45 @@
-"""Preserve PktMon captures while correcting mislabeled native Wi-Fi frames."""
+﻿"""Preserve PktMon captures while correcting mislabelled link-layer frames.
+
+Two kinds are corrected, each only when every packet on that interface agrees:
+  * native Wi-Fi frames recorded with the Ethernet link type
+  * bare IP packets recorded with the Ethernet link type (VPN/tunnel adapters)
+"""
 
 from pathlib import Path
 import shutil
 import struct
 from tempfile import NamedTemporaryFile
+
+LINKTYPE_ETHERNET = 1
+LINKTYPE_RAW = 101
+LINKTYPE_WIFI = 105
+
+
+def _is_ipv4(packet: bytes) -> bool:
+    """Bare IPv4 header: version 4, a sane IHL and a total length that fits."""
+    if len(packet) < 20:
+        return False
+    if packet[0] >> 4 != 4:
+        return False
+    header_length = (packet[0] & 0x0F) * 4
+    if header_length < 20 or header_length > len(packet):
+        return False
+    total = int.from_bytes(packet[2:4], "big")
+    return header_length <= total <= len(packet)
+
+
+def _is_ipv6(packet: bytes) -> bool:
+    """Bare IPv6 header: version 6 and a payload length that fits the frame."""
+    if len(packet) < 40:
+        return False
+    if packet[0] >> 4 != 6:
+        return False
+    payload = int.from_bytes(packet[4:6], "big")
+    return payload == 0 or 40 + payload <= len(packet)
+
+
+def _is_bare_ip(packet: bytes) -> bool:
+    return _is_ipv4(packet) or _is_ipv6(packet)
 
 
 def _is_wifi_data(packet: bytes) -> bool:
@@ -62,7 +98,8 @@ def prepare_capture(path: Path) -> Path:
                 if length < 20:
                     return path
                 interface = dict(offset=position + 8, endian=endian, count=0, flags=[],
-                                 eligible=struct.unpack(endian + "H", block[8:10])[0] == 1)
+                                 eligible=struct.unpack(endian + "H", block[8:10])[0] == 1,
+                                 wifi=True, raw=True)
                 section.append(interface)
                 interfaces.append(interface)
             elif kind == 6:
@@ -74,17 +111,24 @@ def prepare_capture(path: Path) -> Path:
                 interface = section[index]
                 interface["count"] += 1
                 packet = block[28:28 + captured]
-                interface["eligible"] &= _is_wifi_data(packet)
-                if interface["eligible"] and packet[1] & 0x40:
+                interface["wifi"] &= _is_wifi_data(packet)
+                interface["raw"] &= _is_bare_ip(packet)
+                if interface["wifi"] and packet[1] & 0x40:
                     interface["flags"].append((position + 29, packet[1] & ~0x40))
             elif kind in (2, 3):
                 # Obsolete/simple packet blocks need separate validation.
                 return path
 
-    fixes = [item for item in interfaces if item["eligible"] and item["count"]]
+    fixes = [item for item in interfaces if item["count"] and (item["wifi"] or item["raw"])]
     if not fixes:
         return path
-    corrected = path.with_name(path.stem + ".wifi-fixed.pcapng")
+    # Re-deriving a file that was already corrected would append the suffix again
+    # (capture.link-fixed.link-fixed...). An already-corrected file is returned as is.
+    if path.stem.endswith(".link-fixed"):
+        return path
+    corrected = path.with_name(path.stem + ".link-fixed.pcapng")
+    if corrected.is_file() and corrected.stat().st_mtime >= path.stat().st_mtime:
+        return corrected
     with NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as target:
         temporary = Path(target.name)
         try:
@@ -92,7 +136,8 @@ def prepare_capture(path: Path) -> Path:
                 shutil.copyfileobj(source, target)
             for item in fixes:
                 target.seek(item["offset"])
-                target.write(struct.pack(item["endian"] + "H", 105))
+                target.write(struct.pack(item["endian"] + "H",
+                                         LINKTYPE_WIFI if item["wifi"] else LINKTYPE_RAW))
                 for offset, flag in item["flags"]:
                     target.seek(offset)
                     target.write(bytes([flag]))
@@ -104,5 +149,10 @@ def prepare_capture(path: Path) -> Path:
         temporary.replace(corrected)
     finally:
         temporary.unlink(missing_ok=True)
-    print(f"[兼容] 检测到 Wi-Fi 帧被标为以太网，已生成修正副本：{corrected}")
+    kinds = []
+    if any(item["wifi"] for item in fixes):
+        kinds.append("Wi-Fi 帧被标为以太网")
+    if any(item["raw"] and not item["wifi"] for item in fixes):
+        kinds.append("隧道裸 IP 包被标为以太网")
+    print(f"[兼容] 检测到{'、'.join(kinds)}，已生成修正副本：{corrected}")
     return corrected

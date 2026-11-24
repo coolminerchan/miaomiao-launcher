@@ -137,7 +137,12 @@ def scan_pcap(decoder,path,stop=None):
         if stop is not None and stop.is_file():break
         node0,node1,b01,b10=decoder.extract_tcp_stream_directions(path,sid)
         port0=node0.rsplit(':',1)[-1];port1=node1.rsplit(':',1)[-1]
-        data=b10 if port1 in decoder.GAME_PORTS else b01 if port0 in decoder.GAME_PORTS else b''
+        if port1 in decoder.GAME_PORTS:data=b10
+        elif port0 in decoder.GAME_PORTS:data=b01
+        else:
+            # The Steam build gets its game port at runtime, so the port cannot
+            # identify the server side; take whichever direction parses.
+            data=b10 if decoder.looks_like_game_stream(b10) or not decoder.looks_like_game_stream(b01) else b01
         if not data:continue
         packets,_=decoder.parse_game_stream(data)
         for packet in packets:

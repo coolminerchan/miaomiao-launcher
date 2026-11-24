@@ -5,6 +5,7 @@ param(
     [string]$OutDir,
     [ValidateRange(1, 65535)]
     [int[]]$Ports = @(11001, 11002, 11003, 11004, 21001, 21002),
+    [string[]]$ServerIps = @(),
     [ValidateRange(0, 3600)]
     [int]$AutoStopSeconds = 0,
     [switch]$CleanupOnly,
@@ -79,7 +80,10 @@ function Get-PacketMonitorFilterState {
     if ($rows.Count -eq 0 -and ($lines -join "`n") -match '(?im)^\s*(none|无|無|no (packet )?filters( configured)?)\s*[.。]?\s*$') {
         return 'Empty'
     }
-    if ($rows.Count -gt 0 -and @($rows -notmatch '^\s*\d+\s+OFBackup_(\d{1,5})\s+TCP\s+\1\s*$').Count -eq 0) {
+    # Accept both our own port filters and the address filters used by channels
+    # whose game ports are decided at runtime.
+    $own = 'OFBackup_(\d{1,5})\s+TCP\s+\1\s*$|OFBackup_ip_[\w.]+\s+TCP\s+'
+    if ($rows.Count -gt 0 -and @($rows -notmatch $own).Count -eq 0) {
         return 'Backup'
     }
     return 'Other'
@@ -141,6 +145,16 @@ try {
     New-Item -ItemType Directory -Path $sessionPath | Out-Null
     foreach ($port in ($Ports | Sort-Object -Unique)) {
         Invoke-PacketMonitor @('filter', 'add', "OFBackup_$port", '-t', 'TCP', '-p', "$port") | Out-Null
+        $filtersAdded = $true
+    }
+    # Channels whose game ports are assigned at runtime (for example the Steam
+    # build) cannot be captured by port. Fall back to the server address instead,
+    # which the client does publish in its own config. A single comma-joined
+    # argument binds as one string, so split it back into addresses.
+    $addresses = @($ServerIps | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    foreach ($address in ($addresses | Sort-Object -Unique)) {
+        $label = 'OFBackup_ip_' + ($address -replace '[^0-9A-Za-z]', '_')
+        Invoke-PacketMonitor @('filter', 'add', $label, '-t', 'TCP', '-i', $address) | Out-Null
         $filtersAdded = $true
     }
     # PktMon buffers events until the trace stops, so a single long trace stays

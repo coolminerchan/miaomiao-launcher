@@ -49,4 +49,33 @@ class ChecklistTests(unittest.TestCase):
             result=checklist.final_report(d)
             self.assertTrue(all(i['state']=='unknown' for i in result['items']))
 
+
+class RuntimePortTests(unittest.TestCase):
+    """Channels that pick their game port at runtime must still be decoded."""
+    def frame(self,msg_id,body=b'',flag=0):
+        # Frame header length is big-endian, matching HEADER_STRUCT in the decoder.
+        import struct
+        head=net_pb2.PacketHead(msg_id=msg_id,seq_id=1,packet_id=1,flag=flag,body_len=len(body))
+        raw=head.SerializeToString()
+        return struct.pack('>H',len(raw))+raw+body
+    def setUp(self):
+        import sys
+        tool=Path(__file__).resolve().parent/'backup-tool'
+        sys.path.insert(0,str(tool))
+        sys.path.insert(0,str(tool/'proto_gen'))
+        global net_pb2
+        import net_pb2
+    def test_non_game_bytes_are_not_a_game_stream(self):
+        import parse_pcap as decoder
+        self.assertFalse(decoder.looks_like_game_stream(b''))
+        self.assertFalse(decoder.looks_like_game_stream(b'\xff\xff\xff\xff'))
+    def test_pick_directions_prefers_parsable_side(self):
+        import parse_pcap as decoder
+        good=self.frame(1001,b'\x08\x01')
+        self.assertEqual(decoder.pick_directions(b'GET / HTTP/1.1\r\n\r\n',good)[1][0],'s2c')
+        self.assertEqual(decoder.pick_directions(good,b'HTTP')[0][0],'s2c')
+    def test_pick_directions_keeps_both_sides(self):
+        import parse_pcap as decoder
+        self.assertEqual([d[0] for d in decoder.pick_directions(b'\x00\x00',b'\x00\x00')],['c2s','s2c'])
+
 if __name__=='__main__':unittest.main()

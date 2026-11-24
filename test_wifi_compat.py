@@ -48,4 +48,33 @@ class WifiCompatTests(unittest.TestCase):
             source=Path(d)/'bad.pcapng';source.write_bytes(b'not-a-pcap')
             self.assertEqual(prepare_capture(source),source)
 
+
+def ipv4_tcp(src='198.18.0.1',dst='150.5.131.114',sport=51938,dport=11001,payload=b''):
+    """Bare IPv4+TCP packet as recorded on a tunnel adapter."""
+    total=20+20+len(payload)
+    header=struct.pack('>BBHHHBBH4s4s',0x45,0,total,0,0x4000,128,6,0,
+                       bytes(map(int,src.split('.'))),bytes(map(int,dst.split('.'))))
+    tcp=struct.pack('>HHIIBBHHH',sport,dport,1,0,0x50,0x18,65535,0,0)
+    return header+tcp+payload
+
+
+class RawIpCompatTests(unittest.TestCase):
+    """VPN tunnel adapters deliver bare IP packets under the Ethernet link type."""
+    def test_bare_ip_capture_is_relabelled_raw(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'tunnel.pcapng';raw=capture([ipv4_tcp()]);source.write_bytes(raw)
+            result=prepare_capture(source)
+            self.assertNotEqual(result,source);self.assertEqual(source.read_bytes(),raw)
+            self.assertEqual(struct.unpack_from('<H',result.read_bytes(),36)[0],101)
+    def test_mixed_ip_and_ethernet_is_not_guessed(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'mixed-ip.pcapng'
+            raw=capture([ipv4_tcp(),b'\0'*60]);source.write_bytes(raw)
+            self.assertEqual(prepare_capture(source),source)
+    def test_genuine_ethernet_is_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            frame=b'\xff'*6+b'\x11'*6+b'\x08\x00'+ipv4_tcp()
+            source=Path(d)/'eth.pcapng';source.write_bytes(capture([frame]))
+            self.assertEqual(prepare_capture(source),source)
+
 if __name__=='__main__':unittest.main()

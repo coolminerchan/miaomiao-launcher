@@ -87,6 +87,34 @@ def load_cmd_map() -> Dict[int, str]:
     return id_to_name
 
 
+def looks_like_game_stream(data: bytes) -> bool:
+    """True when the byte stream starts with a plausible game frame header."""
+    if len(data) < 4:
+        return False
+    head_len = HEADER_STRUCT.unpack_from(data, 0)[0]
+    if head_len == 0 or head_len > 4096:
+        return False
+    if len(data) < 2 + head_len:
+        return False
+    head = net_pb2.PacketHead()
+    try:
+        head.ParseFromString(data[2:2 + head_len])
+    except Exception:
+        return False
+    return head.msg_id > 0 and 0 < head.body_len <= 32 * 1024 * 1024
+
+
+def pick_directions(b01: bytes, b10: bytes) -> List[Tuple[str, bytes]]:
+    """Labelling is only a hint: the decoded direction decides what is s2c.
+
+    Responses are what the checklist needs, so the direction that parses as a
+    game stream first is treated as s2c and the other side as c2s.
+    """
+    if looks_like_game_stream(b10) or not looks_like_game_stream(b01):
+        return [("c2s", b01), ("s2c", b10)]
+    return [("s2c", b01), ("c2s", b10)]
+
+
 def list_tcp_streams(pcap_path: Path) -> List[int]:
     """使用 tshark 列出 pcapng 中所有的 TCP stream ID。"""
     cmd = [TSHARK, "-n", "-r", str(pcap_path), "-T", "fields", "-e", "tcp.stream", "-Y", "tcp"]
@@ -347,7 +375,11 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         elif p0 in GAME_PORTS:
             directions = [("s2c", b01), ("c2s", b10)]
         else:
-            directions = [("d0to1", b01), ("d1to0", b10)]
+            # Channels that assign game ports at runtime (the Steam build does)
+            # are captured by server address, so the port no longer identifies
+            # the server side. The side that actually speaks the game protocol
+            # must be found by trial instead of guessed from the port.
+            directions = pick_directions(b01, b10)
 
         stream_pkt_total = 0
         for dir_label, payload in directions:
