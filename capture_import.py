@@ -57,7 +57,7 @@ def read_capture(path):
             parts = PurePosixPath(item.filename)
             if parts.is_absolute() or '..' in parts.parts or '\\' in item.filename:
                 raise ValueError('Archive contains an unsafe path.')
-            if item.filename.startswith('export/json/') and '_s2c_' in item.filename and item.filename.endswith('.json'):
+            if item.filename.startswith(('export/json/', 'json/')) and '_s2c_' in item.filename and item.filename.endswith('.json'):
                 match = re.search(r'_s2c_\d+_([A-Za-z0-9_]+)\.json$', item.filename)
                 if match:
                     entries.setdefault(match.group(1), []).append(json.loads(archive.read(item)))

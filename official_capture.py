@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -296,11 +297,18 @@ def status() -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher"])
+    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip"])
     parser.add_argument("--launcher", type=Path)
+    parser.add_argument("--file", type=Path)
+    parser.add_argument("--destination", type=Path)
     args = parser.parse_args()
     try:
-        if args.action == "validate-launcher":
+        if args.action == "export-zip":
+            if args.file is None or args.destination is None:
+                raise ValueError("请选择要交付的账号ZIP及保存位置。")
+            from capture_zip import export_account_zip
+            result = export_account_zip(args.file, args.destination)
+        elif args.action == "validate-launcher":
             from official_launcher import validate_launcher
             result = {"path": str(validate_launcher(args.launcher, BASE))}
         elif args.action == "start":
@@ -309,7 +317,7 @@ def main() -> int:
             result = {"stop": stop, "status": status}[args.action]()
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (ValueError, OSError, subprocess.SubprocessError) as error:
+    except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         print(json.dumps({"error": str(error)}, ensure_ascii=False))
         return 1
 

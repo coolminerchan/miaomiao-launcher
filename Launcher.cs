@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.1")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.2")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 
@@ -353,7 +353,7 @@ namespace OverFieldLocal
             if (!File.Exists(script)) throw new InvalidOperationException("缺少 official_capture.py，请重新解压完整工具包。");
             if(action == "start") extra += " --launcher " + Quote(OfficialLauncherPath);
             var arguments = "-X utf8 " + Quote(script) + " " + action + extra;
-            int timeout = action == "stop" ? 1900000 : action == "start" ? 65000 : 15000;
+            int timeout = action == "stop" ? 1900000 : action == "start" ? 65000 : action == "export-zip" ? 120000 : 15000;
             var result = ExecuteProcess(Python, arguments, timeout, true, CancellationToken.None);
             if (result.Code != 0)
             {
@@ -420,7 +420,8 @@ namespace OverFieldLocal
         readonly Backend backend = new Backend();
         readonly StatusTile server = new StatusTile("服务端"), gateway = new StatusTile("游戏网关"), proxy = new StatusTile("游戏连接");
         readonly ActionButton start = new ActionButton("启动游戏  →", true), services = new ActionButton("启动服务"), stop = new ActionButton("停止服务"), browse = new ActionButton("更改目录");
-        readonly ActionButton captureStart = new ActionButton("开始采集"), captureStop = new ActionButton("结束采集");
+        readonly ActionButton captureStart = new ActionButton("开始采集"), captureStop = new ActionButton("结束采集"), captureSaveZip = new ActionButton("保存账号 ZIP");
+        string lastCaptureZip = "";
         readonly Label captureHint = new Label();
         readonly TextBox officialLauncherPath = new TextBox();
         readonly ActionButton officialBrowse = new ActionButton("选择启动器");
@@ -465,6 +466,14 @@ namespace OverFieldLocal
             captureMode.Click += async delegate { ShowCapturePage(true); if(!uiPreview) await RefreshCaptureState(); };
             officialBrowse.Click += async delegate { await ChooseOfficialLauncher(); };
             captureStop.Enabled = false;
+            captureSaveZip.Enabled = false;
+            captureSaveZip.Click += async delegate {
+                if(busy || captureRunning || !File.Exists(lastCaptureZip)) return;
+                SetBusy(true, "正在另存账号 ZIP");
+                try { await SaveCaptureZip(lastCaptureZip); }
+                catch(Exception error) { Append(error.Message); captureHint.Text=error.Message; }
+                finally { SetBusy(false, ""); }
+            };
             hostMode.Click += async delegate { await SwitchMode("host"); };
             uidBox.ValueChanged += delegate { if (!busy) { backend.Uid=(uint)uidBox.Value; backend.Save(); } };
             hostBox.SelectedIndexChanged += delegate { if (!busy && backend.Mode=="host" && hostBox.SelectedItem != null) { backend.HostAddress=hostBox.SelectedItem.ToString(); backend.Save(); } };
@@ -476,7 +485,7 @@ namespace OverFieldLocal
                 try
                 {
                     var result = await Task.Run(() => backend.Official("start"));
-                    captureRunning = true;
+                    captureRunning = true; lastCaptureZip = "";
                     Append("抓包已就绪，已启动配置的公服启动器。公服路径未使用私服副本或本地UID。");
                     if (result.ContainsKey("hint")) Append(Convert.ToString(result["hint"]));
                     captureHint.Text = "采集中：公服启动器已打开，请正常登录并加载要保存的界面，完成后点「结束采集」。";
@@ -488,7 +497,7 @@ namespace OverFieldLocal
             captureStop.Click += async delegate
             {
                 if (busy) return;
-                SetBusy(true, "正在结束采集并写入账号库");
+                SetBusy(true, "正在结束采集并生成账号 ZIP");
                 try
                 {
                     var captured = await Task.Run(() => backend.Official("stop"));
@@ -500,6 +509,8 @@ namespace OverFieldLocal
                         captureHint.Text = "未获得账号数据，可重新采集。";
                         return;
                     }
+                    lastCaptureZip = zip;
+                    if(!await SaveCaptureZip(zip)) return;
                     uint loginUid = (uint)uidBox.Value;
                     var review = await Task.Run(() => backend.OfficialImport("plan", zip, loginUid, false));
                     bool conflict = review.ContainsKey("conflict") && Convert.ToBoolean(review["conflict"]);
@@ -507,13 +518,15 @@ namespace OverFieldLocal
                     {
                         string detail = review.ContainsKey("conflictWith") ? Convert.ToString(review["conflictWith"]) : "";
                         Append("UID 冲突：" + detail + " 已有存档，未写入。请先备份该账号或换用其他 UID。");
-                        captureHint.Text = "UID 冲突，未写入数据库：" + detail;
+                        captureHint.Text = "账号 ZIP 已交付；UID 冲突，未写入数据库：" + detail;
                         return;
                     }
-                    string message = "即将写入账号库\nUID " + Convert.ToString(review["uid"]) +
+                    string message = "账号 ZIP 已保存交付。是否同时写入本机账号库？\nUID " + Convert.ToString(review["uid"]) +
                         " · " + Convert.ToString(review["name"]) + "\n等级 " + Convert.ToString(review["level"]) +
                         " · " + Convert.ToString(review["characters"]) + " 个角色\n\n确认写入？";
                     if (MessageBox.Show(this, message, "确认入库", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                    if(!File.Exists(Path.Combine(backend.ProfilePath,"db","lolo.db")))
+                        await Task.Run(() => backend.PrepareProfile());
                     var imported = await Task.Run(() => backend.OfficialImport("import", zip, loginUid, false));
                     uint usedUid = Convert.ToUInt32(imported["uid"]);
                     backend.Uid = usedUid; backend.Save(); uidBox.Value = usedUid;
@@ -654,6 +667,28 @@ namespace OverFieldLocal
             logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 6);
             footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 7);
         }
+        async Task<bool> SaveCaptureZip(string zip)
+        {
+            string destination;
+            using(var dialog = new SaveFileDialog { Title="保存采集账号 ZIP（交付文件）", Filter="账号备份 ZIP|*.zip", DefaultExt="zip", AddExtension=true, OverwritePrompt=true, CheckPathExists=true, RestoreDirectory=true, FileName=Path.GetFileName(zip), InitialDirectory=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) })
+            {
+                if(dialog.ShowDialog(this)!=DialogResult.OK) {
+                    Append("已取消另存；原账号ZIP保留，可稍后点击「保存账号 ZIP」。");
+                    captureHint.Text="账号 ZIP 已生成但尚未另存交付，可点击「保存账号 ZIP」重试。";
+                    return false;
+                }
+                destination=dialog.FileName;
+            }
+            var result=await Task.Run(() => backend.Official("export-zip", " --file " + Backend.Quote(zip) + " --destination " + Backend.Quote(destination)));
+            string saved=Convert.ToString(result["path"]);
+            Append("账号 ZIP 已交付："+saved);
+            captureHint.Text="账号 ZIP 已保存："+saved+"。可私下交给可信服主，入库为可选操作。";
+            try {
+                string explorer=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe");
+                Process.Start(new ProcessStartInfo(explorer,"/select,"+Backend.Quote(saved)){UseShellExecute=true});
+            } catch(Exception error) { Append("文件已保存，但无法打开所在位置："+error.Message); }
+            return true;
+        }
         async Task<bool> ChooseOfficialLauncher()
         {
             if(busy || captureRunning || closing) return false;
@@ -681,6 +716,9 @@ namespace OverFieldLocal
                 var state=await Task.Run(() => backend.Official("status"));
                 if(busy || closing) return;
                 captureRunning=state.ContainsKey("active") && Convert.ToBoolean(state["active"]);
+                string zip=state.ContainsKey("accountZip")?Convert.ToString(state["accountZip"]):"";
+                lastCaptureZip=File.Exists(zip)?zip:"";
+                captureSaveZip.Enabled=!captureRunning && File.Exists(lastCaptureZip);
                 officialBrowse.Enabled=!captureRunning;
                 captureStart.Enabled=!captureRunning;
                 captureStop.Enabled=captureRunning;
@@ -755,7 +793,7 @@ namespace OverFieldLocal
             if(closing) return;
             if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再导入角色数据。"); return; }
             string path;
-            using(var dialog=new OpenFileDialog { Title="选择开放空间完整抓包数据",Filter="完整抓包 ZIP|*.zip",CheckFileExists=true })
+            using(var dialog=new OpenFileDialog { Title="选择账号备份或解码抓包 ZIP",Filter="账号备份 / 解码抓包 ZIP|*.zip",CheckFileExists=true })
             { if(dialog.ShowDialog(this)!=DialogResult.OK) return; path=dialog.FileName; }
             try
             {
@@ -797,6 +835,7 @@ namespace OverFieldLocal
             officialBrowse.Enabled = !value && !captureRunning;
             captureStart.Enabled = !value && !captureRunning;
             captureStop.Enabled = !value && captureRunning;
+            captureSaveZip.Enabled = !value && !captureRunning && File.Exists(lastCaptureZip);
             uidBox.Enabled=!value && (lastStatus==null || !lastStatus.ClientRunning); hostBox.Enabled=!value && backend.Mode=="host" && (lastStatus==null || String.IsNullOrEmpty(lastStatus.RuntimeMode)); firewall.Enabled=!value && backend.Mode=="host";
             stop.Text = value ? "取消操作" : "停止服务";
             browse.Enabled = !value && lastStatus != null && !lastStatus.ServerRunning && !lastStatus.ProxyRunning;

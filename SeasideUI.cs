@@ -136,7 +136,7 @@ namespace OverFieldLocal
 
             capturePage=new Surface{Dock=DockStyle.Fill,Padding=new Padding(24,18,24,20),Margin=Padding.Empty,Visible=false};
             var captureRows=Grid(1,7);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int h in new[]{34,28,58,66,10,124,126})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePage.Controls.Add(captureRows);
+            foreach(int h in new[]{34,28,58,66,10,186,126})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePage.Controls.Add(captureRows);
             captureRows.Controls.Add(FitLabel("公服账号采集",11,Theme.Text,FontStyle.Bold),0,0);
             captureRows.Controls.Add(FitLabel("公服启动器路径（仅公服，与私服目录独立）",9.5f,Theme.Muted),0,1);
             var officialRow=Grid(2,1);officialRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));officialRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,146));
@@ -144,15 +144,15 @@ namespace OverFieldLocal
             officialLauncherPath.ReadOnly=true;officialLauncherPath.BorderStyle=BorderStyle.FixedSingle;officialLauncherPath.BackColor=Theme.Panel;officialLauncherPath.ForeColor=Theme.Text;officialLauncherPath.Font=Theme.Font(9.5f);officialLauncherPath.Dock=DockStyle.Fill;officialLauncherPath.Margin=new Padding(0,12,16,10);
             SpaceButton(officialBrowse,true);officialRow.Controls.Add(officialLauncherPath,0,0);officialRow.Controls.Add(officialBrowse,1,0);captureRows.Controls.Add(officialRow,0,2);
             captureHint.Dock=DockStyle.Fill;captureHint.AutoSize=false;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(9);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.TopLeft;captureHint.Margin=Padding.Empty;
-            captureHint.Text="开始采集会先确认抓包就绪，再自动打开这里配置的公服启动器。使用自己的账号正常登录，采集数据只写入本机账号库。";
+            captureHint.Text="抓包就绪后会打开公服。结束采集将生成账号 ZIP，并让你选择保存位置；入库是可选操作，取消或冲突不影响已交付的 ZIP。";
             captureRows.Controls.Add(captureHint,0,3);
-            var captureActions=Grid(1,2);for(int i=0;i<2;i++)captureActions.RowStyles.Add(new RowStyle(SizeType.Percent,50));
-            SpaceButton(captureStart);SpaceButton(captureStop,true);
+            var captureActions=Grid(1,3);for(int i=0;i<3;i++)captureActions.RowStyles.Add(new RowStyle(SizeType.Percent,100f/3));
+            SpaceButton(captureStart);SpaceButton(captureStop,true);SpaceButton(captureSaveZip,true);
             
-            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,0,1);
+            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,0,1);captureActions.Controls.Add(captureSaveZip,0,2);
             captureRows.Controls.Add(captureActions,0,5);
             captureSteps.Dock=DockStyle.Fill;captureSteps.AutoSize=false;captureSteps.Font=Theme.Font(9);captureSteps.ForeColor=Theme.Muted;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.Margin=Padding.Empty;
-            captureSteps.Text="1. 单独选择公服启动器路径，不要选择 profiles 中的私服副本\n2. 点「开始采集」，抓包就绪后会自动打开公服，正常登录并进入场景\n3. 依次打开角色、背包、装备、宠物、邮件、家园等界面，等加载完成\n4. 回到启动器点「结束采集」，核对 UID 与冲突提示后确认入库\n5. 采集需要管理员权限，请先停止私服服务和转发工具";
+            captureSteps.Text="1. 单独选择公服启动器路径，不要选择 profiles 中的私服副本\n2. 点「开始采集」，抓包就绪后会自动打开公服，正常登录并进入场景\n3. 依次打开角色、背包、装备、宠物、邮件、家园等界面，等加载完成\n4. 点「结束采集」，选择账号 ZIP 保存位置；入库可取消\n5. 可点「保存账号 ZIP」重新另存，只私下分享给可信的人";
             captureRows.Controls.Add(captureSteps,0,6);
             scroll.Controls.Add(capturePage);
 
