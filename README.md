@@ -1,6 +1,26 @@
 # 开放空间私服启动器
 
-Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、独立存档、抓包数据导入与备份、房间和玩家管理。界面采用原创天空蓝/海洋青动漫海边插画、宽松按钮与可滚动卡片布局，不嵌入游戏截图或玩家数据。
+Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、独立存档、公服账号数据采集与导入、房间和玩家管理。界面采用原创天空蓝/海洋青动漫海边插画、宽松按钮与独立采集页面，不嵌入游戏截图或玩家数据。
+
+## 当前更新状态（2026-11-24）
+
+**功能分支已合并到 `main`。主干源码已更新，但 Release 下载包尚未同步更新。**
+
+| 内容 | 当前状态 |
+| --- | --- |
+| 左侧四项导航 | 单机模式、局域网服务、公服采集、房间与玩家 |
+| 玩家数据备份工具 | 主干已更新至 1.0.5；公服采集页提供“开始采集 / 结束采集” |
+| 采集后入库 | 解包后核对 UID、提示存档冲突，用户确认后写入当前模式数据库 |
+| TapTap 下载客户端 | 新增实验性 QuickSDK PC 本地私服适配，限定已验证版本和 GameAssembly 哈希 |
+| 客户端副本与存档 | 按来源指纹隔离副本，来源变化时备份旧副本，不重置账号数据库 |
+| 已运行测试 | 25 项测试通过；TapTap 客户端在独立本地服务上登录成功 |
+| 现有 Release `v1.0.0` | **旧版附件，不包含上述全部新功能；标签仍指向 `c48307e`** |
+
+最新实现见 [主干代码](https://github.com/inori-dream/miaomiao-launcher/tree/main)、[公服采集说明](docs/official-capture.md) 和 [TapTap 私服适配说明](docs/taptap-private.md)。
+
+**需要新功能时，不要把旧 Release 便携包当作最新版本。** GitHub 的 Code → Download ZIP 下载的是主干源码，不是免环境的可运行安装包。新的便携发布包仍待打包、验证和上传。
+
+TapTap 适配目前验证了本地登录；场景渲染、持续游玩、其他客户端版本和联机模式尚未完整验证。公服采集仍须通过原版客户端正常认证，本地 UID 登录不会替代公服认证。
 
 ## 致谢与声明
 
@@ -20,13 +40,13 @@ cmd /c build_sdk.cmd
 ```
 
 `build_sdk.cmd` 默认使用 VS 2022 Community 的工具环境；其他安装版本请调整该脚本。
-启动器核心脚本使用 Python 3.12 标准库，不需要在线代理或 `mitmproxy` 才能启动本地 UID 服务。`requirements.txt` 的 `mitmproxy` 用于旧重定向脚本和相关回归测试；安装测试依赖可执行 `python -m pip install -r requirements.txt`。发布包不捆绑启动器的 Python。备份工具使用独立 Python/Protobuf/Cramjam 环境，见其说明。
+启动器核心脚本使用 Python 3.12；本地 UID 服务不需要在线代理或 `mitmproxy`。新的实验性 QuickSDK PC 适配需要 Frida 17.24.3；源码环境可执行 `python -m pip install -r requirements.txt`。其中 `mitmproxy` 用于旧重定向脚本和相关回归测试。备份工具使用独立 Python/Protobuf/Cramjam/TShark 环境，完整解压工具包后还需按采集说明准备运行依赖。旧 Release 便携包自带当时的运行时，但不含本次新增适配的全部依赖。
 
 ## 下载方式
 
-Release 页提供两种包，按需要选：
+**以下是旧 Release `v1.0.0` 的下载说明，不是最新主干的发布包。** 新增四项导航、公服采集及 TapTap 适配尚未全部进入这些附件。
 
-**免配置完整版 `OverFieldLauncher-portable.zip`（推荐，35.6 MB）**
+**旧版免配置完整版 `OverFieldLauncher-portable.zip`（35.6 MB）**
 
 解压即可运行，**自带 Python 运行时、服务端程序、服务资源与数据库模板**，不需要安装 Python，不需要准备任何资源文件：
 
@@ -61,11 +81,21 @@ python preflight.py --mode solo --game-root 'D:\Games\OverField'
 3. 点「启动单机游戏」，首次会复制独立客户端副本，稍等片刻。
 4. 游戏出现原渠道账号弹窗时**不用登录，直接关掉**，或点「进入游戏」即可进入本机服务。
 
-渠道弹窗和游戏标题会保持原样，属正常现象；启动器不改系统代理。现有适配已验证 B 站 PC 版 1.1.12。
+游戏标题可保持原样，启动器不改系统代理。B 站 PC 版使用 PCGameSDK 本地适配；TapTap 下载的已验证 QuickSDK PC 包使用独立实验适配，不再盲目替换 PCGameSDK.dll。具体版本哈希、依赖与限制见 [TapTap 私服适配说明](docs/taptap-private.md)。仅含 TapTap DLL 的未知布局或不同版本不保证兼容。
+
+### 公服账号采集（最新主干）
+
+1. 点击左侧“公服采集”，进入独立页面。
+2. 点击“开始采集”；PktMon 采集需要管理员权限。
+3. 退出并重新打开自己的原版官方客户端，正常认证并进入场景，打开需要备份的角色、背包、装备、宠物、邮件、家园等界面。
+4. 点击“结束采集”，等待解包；核对采集 UID 和已有存档冲突提示，再确认入库。
+5. 本地 UID 与公服身份不是同一机制。采集时不要启动私服副本或转发工具；不需要向服主提供公服密码或 QQBot 保存的 token。
+
+完整运行依赖、产物及排查见 [公服采集说明](docs/official-capture.md)。**本节功能存在于最新主干源码，旧 Release 附件未全部包含。**
 
 ### 通用步骤
 
-1. 在可写目录运行 `OverFieldLauncher.exe`，更改目录，选择兼容的本地 B 站 PC 客户端安装目录；现有适配针对 1.1.12，其他版本不保证兼容。
+1. 在可写目录运行 `OverFieldLauncher.exe`，更改目录，选择兼容的本地客户端安装目录；B 站 PC 版及实验性 QuickSDK PC 适配的具体范围见对应说明，其他版本不保证兼容。
 2. 服务端需自行从合法来源提供 `LoloServer`，包括 `Lolo.exe`、`config.json`、`data/`、`Resource/` 和数据库架构。仅玩局域网服务端时可将这些内容放入启动器旁的 `server-kit/`。
 3. 不要将个人数据库当作公开模板。新建单机/局域网存档只复制数据库架构，不复制模板中的账号或进度；已有模式存档保持不变。个人进度必须由用户明确导入。公开服务模板仍应只含架构，且 `data/` 内不能夹带密钥或个人数据。
 4. 填入自己的本地 UID，选择单机或局域网服务。首次准备会创建独立数据目录。
@@ -98,7 +128,7 @@ python preflight.py --mode solo --game-root 'D:\Games\OverField'
 ## 测试与发布
 
 ```powershell
-python -m unittest test_launcher -v
+python -m unittest test_taptap_private test_official_import test_launcher -v
 ```
 
 测试仅使用合成数据，不需要真实账号。构建后可将 EXE、SDK DLL、图标和必要脚本作为 GitHub Release 附件；不要直接压缩本地工作目录。提交前运行 `python privacy_check.py`，并按 `RELEASE-CHECKLIST.md` 人工复核。
