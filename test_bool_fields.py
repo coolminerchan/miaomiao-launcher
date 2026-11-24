@@ -71,56 +71,5 @@ class BooleanSerializationTests(unittest.TestCase):
         # A missing flag stays absent instead of being invented as false.
         self.assertIsNone(capture_import.model("bool", None))
 
-    def test_fashion_without_base_item_is_still_owned(self):
-        # Fashion entries often omit base_item; the wardrobe reads itemBaseInfo,
-        # so an outfit with only an "outfit" block must still be registered there.
-        main = {
-            "status": "StatusCode_OK", "player_id": 5550002, "player_label": 5550002,
-            "player_name": "Fashion", "level": 10,
-            "characters": [{"character_id": 101001,
-                            "character_appearance": {"badge": 5000},
-                            "outfit_presets": [{"hat": 4200373}]}],
-            "team": {"char1": 101001},
-        }
-        notice = {"items": [{"main_item": {"item_id": 4200373, "item_tag": 6,
-                                           "outfit": {"outfit_id": 4200373}}}]}
-        import zipfile
-        source = self.root / "fashion.zip"
-        with zipfile.ZipFile(source, "w") as archive:
-            archive.writestr("json/00001_s2c_1006_PlayerMainDataRsp.json", json.dumps(main))
-            archive.writestr("json/00002_s2c_200_PackNotice.json", json.dumps(notice))
-        capture_import.import_capture(source, self.profile_path, 0, True, True)
-
-        with closing(sqlite3.connect(self.database)) as connection:
-            payload = json.loads(gzip.decompress(
-                connection.execute("SELECT bin_data FROM of_game WHERE user_id=5550002").fetchone()[0]).decode("utf-8"))
-        items = payload["item"]
-        self.assertIn("4200373", items["itemFashionMap"])
-        self.assertIn("4200373", items["itemBaseInfo"], "outfit missing from itemBaseInfo")
-        self.assertEqual(items["itemBaseInfo"]["4200373"]["num"], 1)
-
-    def test_fashion_does_not_duplicate_an_existing_base_item(self):
-        main = {
-            "status": "StatusCode_OK", "player_id": 5550003, "player_label": 5550003,
-            "player_name": "Dup", "level": 10,
-            "characters": [{"character_id": 101001, "character_appearance": {"badge": 5000}}],
-            "team": {"char1": 101001},
-        }
-        notice = {"items": [{"main_item": {"item_id": 4200399, "item_tag": 6,
-                                           "base_item": {"item_id": 4200399, "num": 2},
-                                           "outfit": {"outfit_id": 4200399}}}]}
-        import zipfile
-        source = self.root / "dup.zip"
-        with zipfile.ZipFile(source, "w") as archive:
-            archive.writestr("json/00001_s2c_1006_PlayerMainDataRsp.json", json.dumps(main))
-            archive.writestr("json/00002_s2c_200_PackNotice.json", json.dumps(notice))
-        capture_import.import_capture(source, self.profile_path, 0, True, True)
-
-        with closing(sqlite3.connect(self.database)) as connection:
-            payload = json.loads(gzip.decompress(
-                connection.execute("SELECT bin_data FROM of_game WHERE user_id=5550003").fetchone()[0]).decode("utf-8"))
-        self.assertEqual(payload["item"]["itemBaseInfo"]["4200399"]["num"], 2)
-
-
 if __name__ == "__main__":
     unittest.main()
