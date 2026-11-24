@@ -1,0 +1,26 @@
+LIBRARY PCGameSDK
+EXPORTS
+SDKInit
+SDKInitInLauncher
+SDKLogin
+SDKLoginInLauncher
+SDKOfflineGameLogin
+SDKLoginByQRCode
+SDKGetUserInfo
+SDKGetUserInfoFromLauncher
+SDKStartHeartbeat
+SDKOpenLauncher
+SDKSetCrashHandler
+SDKPay
+SDKCloseAccount
+SDKOpenAgreementWindow
+SDKSetWindowsMode
+SDKUnInit
+SDKLogout
+SDKBindLauncher
+SDKBindLauncherNoParent
+SDKUnBindLauncher
+SDKGetDLCInfo
+SDKNotifyZone
+SDKShowCustomerService
+SDKTrackEvent
