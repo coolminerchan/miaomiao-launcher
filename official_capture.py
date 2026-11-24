@@ -130,44 +130,74 @@ def preflight() -> dict:
     return {"ok": not problems, "problems": problems}
 
 
-def start() -> dict:
-    """Begin capturing official traffic; the player then logs in with their own account."""
+def wait_capture_ready(process, ready_path: Path, timeout=40) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is not None:
+            raise ValueError(f"抓包程序提前退出（{code}），公服未启动。请查看本次采集日志。")
+        if ready_path.is_file():
+            ready = json.loads(ready_path.read_text(encoding="utf-8-sig"))
+            if ready.get("ready") and int(ready.get("pid", 0)) == process.pid:
+                return ready
+            raise ValueError("抓包程序返回无效就绪信号，公服未启动。")
+        time.sleep(0.1)
+    raise ValueError("等待抓包启动超时，公服未启动。请查看采集日志。")
+
+
+def request_failed_start_stop(process, state):
+    STOP_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    STOP_FLAG.touch()
+    try:
+        process.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        pass  # The script owns cleanup; do not kill it or stop another PktMon session.
+    write_state(dict(state, active=process.poll() is None, phase="stopping", error="采集或公服启动失败，已发送停止信号"))
+
+
+def start(launcher_path=None) -> dict:
+    """Wait for actual capture readiness, then launch only the configured official EXE."""
+    from official_launcher import validate_launcher, launch_official, clean_environment
     if read_state().get("active"):
         raise ValueError("已有采集正在进行，请先结束当前采集。")
+    launcher = validate_launcher(launcher_path, BASE)
+    world_state = RUNTIME / "world-state.json"
+    if world_state.is_file() and json.loads(world_state.read_text(encoding="utf-8-sig")).get("Active"):
+        raise ValueError("请先停止私服服务，再开始公服采集，避免流量混入私服。")
     report = preflight()
     if not report["ok"]:
         raise ValueError("无法开始采集：" + "；".join(report["problems"]))
-
-    session = SESSIONS / dt.datetime.now().strftime("capture_%Y%m%d_%H%M%S")
+    session = SESSIONS / dt.datetime.now().strftime("capture_%Y%m%d_%H%M%S_%f")
     session.mkdir(parents=True, exist_ok=True)
     STOP_FLAG.unlink(missing_ok=True)
-
+    ready_path = session / "capture-ready.json"
     command = [
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-        "-File", str(BASE / "backup-tool" / "capture.ps1"),
-        "-Mode", "Account",
-        "-OutDir", str(session),
-        "-PythonExe", str(python_exe()),
-        "-TSharkExe", str(tshark_exe()),
-        "-StopFlag", str(STOP_FLAG),
+        "-File", str(BASE / "backup-tool" / "capture.ps1"), "-Mode", "Account",
+        "-OutDir", str(session), "-PythonExe", str(python_exe()),
+        "-TSharkExe", str(tshark_exe()), "-StopFlag", str(STOP_FLAG),
+        "-ReadyPath", str(ready_path),
     ]
-    # capture.ps1 blocks on Read-Host until Enter arrives on stdin; keep the pipe open
-    # and write the newline from stop().
-    process = subprocess.Popen(
-        command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        cwd=str(BASE / "backup-tool"), creationflags=NO_WINDOW,
-    )
-    write_state({
-        "active": True,
-        "startedAt": dt.datetime.now().isoformat(timespec="seconds"),
-        "session": str(session),
-        "pid": process.pid,
-    })
-    log(f"开始采集公服流量 -> {session}")
-    return {
-        "session": str(session),
-        "hint": "现在启动公服客户端，用你自己的渠道账号登录并进入游戏，逐项打开要保存的界面；完成后点「结束采集」。",
-    }
+    with (session / "capture-worker.stdout.log").open("ab") as out, (session / "capture-worker.stderr.log").open("ab") as err:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                   cwd=str(BASE / "backup-tool"), creationflags=NO_WINDOW,
+                                   env=clean_environment())
+    state = {"active": False, "phase": "starting", "startedAt": dt.datetime.now().isoformat(timespec="seconds"),
+             "session": str(session), "pid": process.pid, "officialLauncherPath": str(launcher)}
+    write_state(state)
+    try:
+        ready = wait_capture_ready(process, ready_path)
+        state.update(active=True, phase="capturing", capturePath=ready.get("session", ""))
+        write_state(state)
+        official = launch_official(launcher, BASE)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        request_failed_start_stop(process, state)
+        raise
+    state["officialPid"] = official.pid
+    write_state(state)
+    log(f"抓包已就绪，公服启动器已打开 -> {launcher}")
+    return {"session": str(session), "officialLauncherPath": str(launcher), "officialPid": official.pid,
+            "hint": "抓包已开始，公服启动器已打开。请正常登录并进入场景；若客户端已在运行，请退出后重新打开以采集登录响应。"}
 
 
 def stop() -> dict:
@@ -199,6 +229,7 @@ def stop() -> dict:
         log("等待抓包脚本结束超时，改为强制结束")
         powershell(f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue")
     STOP_FLAG.unlink(missing_ok=True)
+    write_state(dict(state, active=False, phase="decoding"))
 
     etl = sorted(session.rglob("capture.etl")) if session.is_dir() else []
     if not etl:
@@ -244,23 +275,31 @@ def stop() -> dict:
 
 def status() -> dict:
     state = read_state()
+    readiness = preflight()
     return {
         "active": bool(state.get("active")),
         "session": state.get("session", ""),
         "startedAt": state.get("startedAt", ""),
         "playerUids": state.get("playerUids", []),
         "accountZip": state.get("accountZip", ""),
-        "ready": preflight()["ok"],
-        "problems": preflight()["problems"],
+        "ready": readiness["ok"],
+        "problems": readiness["problems"],
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "stop", "status"])
+    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher"])
+    parser.add_argument("--launcher", type=Path)
     args = parser.parse_args()
     try:
-        result = {"start": start, "stop": stop, "status": status}[args.action]()
+        if args.action == "validate-launcher":
+            from official_launcher import validate_launcher
+            result = {"path": str(validate_launcher(args.launcher, BASE))}
+        elif args.action == "start":
+            result = start(args.launcher)
+        else:
+            result = {"stop": stop, "status": status}[args.action]()
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:

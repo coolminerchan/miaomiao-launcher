@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.1")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 
@@ -29,7 +29,7 @@ namespace OverFieldLocal
             bool created;
             using (var instance = new Mutex(true, "Local\\OverFieldLocalLauncher", out created))
             {
-                if (!created)
+                if (!created && Array.IndexOf(args, "--ui-preview") < 0)
                 {
                     Native.FocusLauncher();
                     return;
@@ -160,6 +160,7 @@ namespace OverFieldLocal
     {
         public readonly string BaseDir = AppDomain.CurrentDomain.BaseDirectory;
         public string Root = "";
+        public string OfficialLauncherPath = "";
         public string Python;
         public string Mode = "solo";
         public string HostAddress;
@@ -181,6 +182,7 @@ namespace OverFieldLocal
                 {
                     var data = new JavaScriptSerializer().Deserialize<Dictionary<string, string>>(File.ReadAllText(path, Encoding.UTF8));
                     if (data.ContainsKey("gameRoot")) Root = data["gameRoot"];
+                    if (data.ContainsKey("officialLauncherPath")) OfficialLauncherPath = data["officialLauncherPath"];
                     if (data.ContainsKey("pythonExe")) Python = data["pythonExe"];
                     if (data.ContainsKey("mode") && (data["mode"] == "solo" || data["mode"] == "host")) Mode = data["mode"];
                     if (data.ContainsKey("hostAddress") && !String.IsNullOrWhiteSpace(data["hostAddress"])) HostAddress = data["hostAddress"];
@@ -197,7 +199,7 @@ namespace OverFieldLocal
         {
             var path = Path.Combine(BaseDir, "launcher.settings.json");
             var temp = path + ".tmp";
-            File.WriteAllText(temp, new JavaScriptSerializer().Serialize(new Dictionary<string, string> { { "gameRoot", Root }, { "pythonExe", Python }, { "mode", Mode }, { "hostAddress", HostAddress }, { "uid", Uid.ToString() } }), new UTF8Encoding(false));
+            File.WriteAllText(temp, new JavaScriptSerializer().Serialize(new Dictionary<string, string> { { "gameRoot", Root }, { "officialLauncherPath", OfficialLauncherPath }, { "pythonExe", Python }, { "mode", Mode }, { "hostAddress", HostAddress }, { "uid", Uid.ToString() } }), new UTF8Encoding(false));
             if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
         }
         public static List<string> LanAddresses()
@@ -349,8 +351,10 @@ namespace OverFieldLocal
         {
             string script = Path.Combine(BaseDir, "official_capture.py");
             if (!File.Exists(script)) throw new InvalidOperationException("缺少 official_capture.py，请重新解压完整工具包。");
+            if(action == "start") extra += " --launcher " + Quote(OfficialLauncherPath);
             var arguments = "-X utf8 " + Quote(script) + " " + action + extra;
-            var result = Execute(Python, arguments);
+            int timeout = action == "stop" ? 1900000 : action == "start" ? 65000 : 15000;
+            var result = ExecuteProcess(Python, arguments, timeout, true, CancellationToken.None);
             if (result.Code != 0)
             {
                 string message = result.Error.Length > 0 ? result.Error : result.Output;
@@ -418,6 +422,9 @@ namespace OverFieldLocal
         readonly ActionButton start = new ActionButton("启动游戏  →", true), services = new ActionButton("启动服务"), stop = new ActionButton("停止服务"), browse = new ActionButton("更改目录");
         readonly ActionButton captureStart = new ActionButton("开始采集"), captureStop = new ActionButton("结束采集");
         readonly Label captureHint = new Label();
+        readonly TextBox officialLauncherPath = new TextBox();
+        readonly ActionButton officialBrowse = new ActionButton("选择启动器");
+        bool captureRunning;
         readonly ActionButton soloMode = new ActionButton("单机模式"), hostMode = new ActionButton("局域网服务"), captureMode = new ActionButton("公服采集"), importData = new ActionButton("导入数据"), backupData = new ActionButton("备份存档"), openData = new ActionButton("数据目录"), firewall = new ActionButton("局域网权限"), roomsButton=new ActionButton("房间与玩家");
         readonly NumericUpDown uidBox = new NumericUpDown();
         readonly ComboBox hostBox = new ComboBox();
@@ -455,23 +462,28 @@ namespace OverFieldLocal
             ApplyMode();
             ShowCapturePage(false);
             soloMode.Click += async delegate { await SwitchMode("solo"); };
-            captureMode.Click += delegate { ShowCapturePage(true); };
+            captureMode.Click += async delegate { ShowCapturePage(true); if(!uiPreview) await RefreshCaptureState(); };
+            officialBrowse.Click += async delegate { await ChooseOfficialLauncher(); };
+            captureStop.Enabled = false;
             hostMode.Click += async delegate { await SwitchMode("host"); };
             uidBox.ValueChanged += delegate { if (!busy) { backend.Uid=(uint)uidBox.Value; backend.Save(); } };
             hostBox.SelectedIndexChanged += delegate { if (!busy && backend.Mode=="host" && hostBox.SelectedItem != null) { backend.HostAddress=hostBox.SelectedItem.ToString(); backend.Save(); } };
             captureStart.Click += async delegate
             {
-                if (busy) return;
-                SetBusy(true, "正在开始公服采集");
+                if (busy || captureRunning) return;
+                if(String.IsNullOrWhiteSpace(backend.OfficialLauncherPath) && !await ChooseOfficialLauncher()) return;
+                SetBusy(true, "正在确认抓包就绪并启动公服");
                 try
                 {
                     var result = await Task.Run(() => backend.Official("start"));
-                    Append("公服采集已开始。现在启动官方客户端，用自己的渠道账号登录并进入游戏。");
+                    captureRunning = true;
+                    Append("抓包已就绪，已启动配置的公服启动器。公服路径未使用私服副本或本地UID。");
                     if (result.ContainsKey("hint")) Append(Convert.ToString(result["hint"]));
-                    captureHint.Text = "采集中：请正常登录官方客户端并打开要保存的界面，完成后点「结束采集」。";
+                    captureHint.Text = "采集中：公服启动器已打开，请正常登录并加载要保存的界面，完成后点「结束采集」。";
                 }
                 catch (Exception error) { Append(error.Message); captureHint.Text = error.Message; }
                 finally { SetBusy(false, ""); }
+                await RefreshCaptureState();
             };
             captureStop.Click += async delegate
             {
@@ -480,6 +492,7 @@ namespace OverFieldLocal
                 try
                 {
                     var captured = await Task.Run(() => backend.Official("stop"));
+                    captureRunning = false;
                     string zip = captured.ContainsKey("accountZip") ? Convert.ToString(captured["accountZip"]) : "";
                     if (String.IsNullOrWhiteSpace(zip) || !System.IO.File.Exists(zip))
                     {
@@ -641,6 +654,39 @@ namespace OverFieldLocal
             logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 6);
             footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 7);
         }
+        async Task<bool> ChooseOfficialLauncher()
+        {
+            if(busy || captureRunning || closing) return false;
+            string selected;
+            using(var dialog = new OpenFileDialog { Title="选择公服启动器或原版客户端（与私服目录独立）", Filter="公服启动器 EXE|*.exe", CheckFileExists=true, Multiselect=false, FileName=backend.OfficialLauncherPath })
+            { if(dialog.ShowDialog(this)!=DialogResult.OK) return false; selected=dialog.FileName; }
+            SetBusy(true, "正在校验公服启动器路径");
+            try
+            {
+                var info=await Task.Run(() => backend.Official("validate-launcher", " --launcher " + Backend.Quote(selected)));
+                if(closing) return false;
+                backend.OfficialLauncherPath=Convert.ToString(info["path"]);
+                backend.Save(); officialLauncherPath.Text=backend.OfficialLauncherPath;
+                Append("公服启动器路径已独立保存，私服游戏目录未改变。");
+                return true;
+            }
+            catch(Exception error) { Append(error.Message); MessageBox.Show(this,error.Message,"公服路径不可用",MessageBoxButtons.OK,MessageBoxIcon.Warning); return false; }
+            finally { SetBusy(false, ""); }
+        }
+        async Task RefreshCaptureState()
+        {
+            if(busy || closing) return;
+            try
+            {
+                var state=await Task.Run(() => backend.Official("status"));
+                if(busy || closing) return;
+                captureRunning=state.ContainsKey("active") && Convert.ToBoolean(state["active"]);
+                officialBrowse.Enabled=!captureRunning;
+                captureStart.Enabled=!captureRunning;
+                captureStop.Enabled=captureRunning;
+            }
+            catch(Exception error) { if(!closing) Append("采集状态检查失败："+error.Message); }
+        }
         void ShowCapturePage(bool show)
         {
             if (capturePage != null) capturePage.Visible = show;
@@ -748,6 +794,9 @@ namespace OverFieldLocal
             busy = value; start.Enabled = services.Enabled = !value; stop.Enabled = true;
             soloMode.Enabled=hostMode.Enabled=importData.Enabled=backupData.Enabled=!value;
             captureMode.Enabled = !value;
+            officialBrowse.Enabled = !value && !captureRunning;
+            captureStart.Enabled = !value && !captureRunning;
+            captureStop.Enabled = !value && captureRunning;
             uidBox.Enabled=!value && (lastStatus==null || !lastStatus.ClientRunning); hostBox.Enabled=!value && backend.Mode=="host" && (lastStatus==null || String.IsNullOrEmpty(lastStatus.RuntimeMode)); firewall.Enabled=!value && backend.Mode=="host";
             stop.Text = value ? "取消操作" : "停止服务";
             browse.Enabled = !value && lastStatus != null && !lastStatus.ServerRunning && !lastStatus.ProxyRunning;

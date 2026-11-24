@@ -9,6 +9,7 @@ param(
     [int]$AutoStopSeconds = 0,
     [switch]$CleanupOnly,
     [string]$StopFlag,
+    [string]$ReadyPath,
     [string]$PythonExe,
     [string]$TSharkExe
 )
@@ -118,6 +119,11 @@ try {
     }
     Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $etl) | Out-Null
     $started = $true
+    if ($ReadyPath) {
+        $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
+    }
 
     Write-Host "抓包已开始。输出目录 $sessionPath"
     if ($Mode -eq 'Account') {
