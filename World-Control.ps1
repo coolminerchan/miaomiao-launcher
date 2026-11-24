@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Start','Stop','Status','Backup')][string]$Action = 'Status',
+    [ValidateSet('Start','Stop','Status','Backup','Cleanup')][string]$Action = 'Status',
+    [switch]$OrphansOnly,
     [string]$GameRoot = '',
     [ValidateSet('solo','host')][string]$Mode = 'solo',
     [uint32]$Uid = 1000000,
@@ -162,6 +163,42 @@ function Wait-Ready([string]$Address,[int]$Port,$Record) {
 function Client-Running {
     return @(Get-Process -Name 'launcher' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $taskOriginalClient -or ($_.Path -and $_.Path.StartsWith($taskBase+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) }).Count -gt 0
 }
+function Stop-Orphans {
+    # Helper processes this build spawns outlive their parent if the launcher is
+    # closed while elevated. They are identified by their own command lines so an
+    # unrelated PktMon session or someone else's python is never touched.
+    $stopped = @()
+    $candidates = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $command = $_.CommandLine
+        if ([string]::IsNullOrWhiteSpace($command)) { return $false }
+        ($_.Name -eq 'python.exe' -and $command -like "*$PSScriptRoot*capture_checklist.py*" -and $command -like '* watch *') -or
+        ($_.Name -eq 'PktMon.exe' -and $command -like '*live-progress*snapshot*')
+    })
+    foreach ($candidate in $candidates) {
+        try { Stop-Process -Id $candidate.ProcessId -Force -ErrorAction Stop; $stopped += $candidate.ProcessId } catch { }
+    }
+    return $stopped
+}
+function Stop-Cleanup($State) {
+    # Keep services alive while the game is actually using them; only reap what
+    # this launcher started and nothing is connected to any more.
+    if ($State -and $State.Active) {
+        if (Client-Running) {
+            Write-Output 'Game still running; kept this profile services.'
+            return
+        }
+        Stop-Recorded $State.Proxy
+        Stop-Recorded $State.Gateway
+        Stop-Recorded $State.Server
+        $State.Active = $false
+        Save-State $State
+        Write-Output 'Stopped the services started by this launcher.'
+    } else {
+        Write-Output 'No services started by this launcher.'
+    }
+    $orphans = @(Stop-Orphans)
+    if ($orphans.Count -gt 0) { Write-Output ("Reaped {0} leftover helper process(es)." -f $orphans.Count) }
+}
 function Invoke-World {
     $taskState=Read-State
     if ($Action -eq 'Status') {
@@ -182,6 +219,7 @@ function Invoke-World {
         } | ConvertTo-Json -Compress
         return
     }
+    if ($Action -eq 'Cleanup') { Stop-Cleanup $taskState; return }
     if ($Action -eq 'Stop') { Stop-World $taskState; Write-Output 'Profile services stopped; previous routing restored.'; return }
     $taskPython=if ($PythonExe) { (Get-Item -LiteralPath $PythonExe).FullName } else { (Get-Command python.exe).Source }
     if ($Action -eq 'Backup') {

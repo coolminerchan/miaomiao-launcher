@@ -227,8 +227,7 @@ namespace OverFieldLocal
             return b.Append('\\', slashes * 2).Append('"').ToString();
         }
         public Result Run(string action, bool launch = false, CancellationToken cancellation = default(CancellationToken))
-        {
-            var arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(ControlScript) + " -Action " + action + " -GameRoot " + Quote(Root);
+        {            var arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(ControlScript) + " -Action " + action + " -GameRoot " + Quote(Root);
             arguments += " -Mode " + Mode + " -HostAddress " + Quote(Mode == "solo" ? "127.0.0.1" : HostAddress) + " -Uid " + Uid.ToString();
             if (action == "Status") arguments += " -Json";
             if (action == "Start" || action == "Backup") arguments += " -PythonExe " + Quote(Python);
@@ -245,6 +244,59 @@ namespace OverFieldLocal
                 return new JavaScriptSerializer().Deserialize<Result>(File.ReadAllText(resultPath, Encoding.UTF8));
             }
             finally { try { if (File.Exists(resultPath)) File.Delete(resultPath); } catch { } }
+        }
+        // An in-flight capture is a detached worker too. Ask it to finish and leave
+        // it to flush its own trace; never block exit waiting for a long decode.
+        public void StopCaptureQuietly()
+        {
+            try
+            {
+                string script = Path.Combine(BaseDir, "official_capture.py");
+                if (!File.Exists(script)) return;
+                if (!Convert.ToBoolean(Official("status")["active"])) return;
+                var arguments = "-X utf8 " + Quote(script) + " stop";
+                using (var process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo(Python, arguments)
+                    {
+                        UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = BaseDir,
+                        RedirectStandardOutput = true, RedirectStandardError = true,
+                        StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+                    };
+                    process.Start();
+                    // stop writes its flag first, so a short wait is enough to be safe.
+                    if (!process.WaitForExit(15000)) { try { process.Kill(); } catch { } }
+                }
+            }
+            catch { }
+        }
+        // Services are started as detached background processes, so closing the
+        // launcher leaves them running unless they are stopped explicitly. This
+        // bypasses lifetime (already cancelled at exit) and never throws.
+        public string Cleanup()
+        {
+            if (!File.Exists(ControlScript)) return "";
+            var arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(ControlScript)
+                + " -Action Cleanup -GameRoot " + Quote(Root) + " -Mode " + Mode
+                + " -HostAddress " + Quote(Mode == "solo" ? "127.0.0.1" : HostAddress) + " -Uid " + Uid.ToString();
+            try
+            {
+                using (var process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo(
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
+                        arguments)
+                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = BaseDir,
+                      RedirectStandardOutput = true, RedirectStandardError = true,
+                      StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    process.StandardError.ReadToEnd();
+                    if (!process.WaitForExit(20000)) { try { process.Kill(); } catch { } return output; }
+                    return output;
+                }
+            }
+            catch { return ""; }
         }
         public Result Execute(string executable, string arguments)
         {
@@ -603,6 +655,14 @@ namespace OverFieldLocal
                 closing = true; timer.Stop(); timer.Dispose();
                 captureProgressTimer.Stop(); captureProgressTimer.Dispose();
                 backend.CancelAll();
+                // Detached services would otherwise survive this process and keep
+                // holding 18080/18100. Reap only what this launcher started.
+                if (!uiPreview && smokePath == null && e.CloseReason != CloseReason.WindowsShutDown)
+                {
+                    try { Cursor = Cursors.WaitCursor; backend.StopCaptureQuietly(); backend.Cleanup(); }
+                    catch { }
+                    finally { Cursor = Cursors.Default; }
+                }
             };
         }
         Label LabelText(string text, float size, Color color, FontStyle style = FontStyle.Regular)
@@ -710,7 +770,9 @@ namespace OverFieldLocal
                 }
                 string warning=data.ContainsKey("warning")?Convert.ToString(data["warning"]):"";
                 string stamp=data.ContainsKey("updatedAt")?Convert.ToString(data["updatedAt"]):"";
-                captureProgressHint.Text=String.IsNullOrWhiteSpace(warning)?"最近核对："+stamp+" · 只按成功解码的响应确认，空列表不代表没有收到。":warning;
+                object live=data.ContainsKey("livePackets")?data["livePackets"]:null;
+                string packets=live!=null && Convert.ToInt64(live)>0 ? " · PktMon 已记录 "+String.Format("{0:N0}",Convert.ToInt64(live))+" 个数据包" : "";
+                captureProgressHint.Text=(String.IsNullOrWhiteSpace(warning)?"最近核对："+stamp:warning)+packets;
             } finally { captureChecklist.EndUpdate(); }
         }
         async Task<bool> SaveCaptureZip(string zip)
