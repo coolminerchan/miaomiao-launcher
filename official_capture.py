@@ -208,13 +208,86 @@ def start(launcher_path=None) -> dict:
             "hint": "抓包已开始，公服启动器已打开。请正常登录并进入场景；若客户端已在运行，请退出后重新打开以采集登录响应。"}
 
 
-def stop() -> dict:
-    """Stop capturing, decode traffic, and report the captured account ZIP."""
-    state = read_state()
-    if not state.get("active"):
-        raise ValueError("当前没有进行中的采集。")
+def result_from_export(export: Path, session: Path):
+    summary_path = export / "summary.json"
+    if not summary_path.is_file():
+        return None
+    if not summary_path.resolve().is_relative_to(session.resolve()):
+        raise ValueError("采集产物不能指向当前会话之外。")
+    summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(summary, dict) or "player_uids" not in summary or "total_packets" not in summary:
+        return None
+    name = summary.get("account_zip", "")
+    account_zip = None
+    if name:
+        if not isinstance(name, str) or Path(name).name != name or "\\" in name or Path(name).drive:
+            raise ValueError("账号ZIP产物路径不安全。")
+        account_zip = export / name
+        if not account_zip.is_file():
+            return None
+        if account_zip.resolve().parent != export.resolve():
+            raise ValueError("账号ZIP不能链接到输出目录之外。")
+        from capture_zip import inspect_account_zip
+        inspect_account_zip(account_zip)
+    return {"session": str(session), "export": str(export),
+            "accountZip": str(account_zip) if account_zip else "", "playerUids": summary["player_uids"]}
 
+
+def completed_result(session: Path):
+    if not session.is_dir():
+        return None
+    summaries = sorted(session.rglob("summary.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in summaries:
+        if path.parent.name.startswith("export"):
+            result = result_from_export(path.parent, session)
+            if result is not None:
+                return result
+    return None
+
+
+def finalize_capture(result, recovered=False):
+    final = dict(read_state(), **result)
+    final.update(active=False, phase="complete", recovered=recovered,
+                 stoppedAt=dt.datetime.now().isoformat(timespec="seconds"))
+    final.pop("error", None)
+    write_state(final)
+    log("采集产物已确认，账号ZIP可另存交付。")
+    return result
+
+
+def recover() -> dict:
+    """Recover completed outputs only; never signal or stop a running capture."""
+    state = read_state()
+    if state.get("active"):
+        raise ValueError("当前采集仍在进行，请先由用户结束采集。")
+    if not state.get("session"):
+        raise ValueError("没有可恢复的采集会话。")
     session = Path(state["session"])
+    if not session.resolve().is_relative_to(SESSIONS.resolve()):
+        raise ValueError("采集会话路径不属于当前启动器。")
+    result = completed_result(session)
+    if result is None:
+        raise ValueError("没有找到完整的已解码产物，原始文件已保留。")
+    current = read_state()
+    if current.get("active") or current.get("session") != state.get("session"):
+        raise ValueError("采集会话已变化，未改写状态。")
+    return finalize_capture(result, recovered=True)
+
+
+def stop() -> dict:
+    """Receive worker-completed outputs; only decode when no usable output exists."""
+    state = read_state()
+    if not state.get("session"):
+        raise ValueError("当前没有采集会话或可恢复的完成产物。")
+    session = Path(state["session"])
+    if not session.resolve().is_relative_to(SESSIONS.resolve()):
+        raise ValueError("采集会话路径不属于当前启动器。")
+    if not state.get("active"):
+        if state.get("session"):
+            result = completed_result(session)
+            if result is not None:
+                return finalize_capture(result, recovered=True)
+        raise ValueError("当前没有进行中的采集，也没有可恢复的完成产物。")
 
     # 1) Cooperative stop: the script polls this flag, then runs its own finally block
     #    (stop PktMon, remove only its own filters, release the mutex) and decodes.
@@ -238,6 +311,9 @@ def stop() -> dict:
         powershell(f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue")
     STOP_FLAG.unlink(missing_ok=True)
     write_state(dict(state, active=False, phase="decoding"))
+    finished = completed_result(session)
+    if finished is not None:
+        return finalize_capture(finished)
 
     etl = sorted(session.rglob("capture.etl")) if session.is_dir() else []
     if not etl:
@@ -252,6 +328,8 @@ def stop() -> dict:
                        capture_output=True, text=True, timeout=900, creationflags=NO_WINDOW)
 
     export = etl_path.parent / "export"
+    if export.exists() and any(export.iterdir()):
+        export = etl_path.parent / ("export-recovery-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
     decode = subprocess.run(
         [str(python_exe()), "-B", "-X", "utf8", str(BASE / "backup-tool" / "parse_pcap.py"),
          str(pcap_path), "--out", str(export)],
@@ -261,24 +339,10 @@ def stop() -> dict:
     if decode.returncode != 0:
         raise ValueError("解码失败：" + (decode.stderr or decode.stdout or "").strip()[-400:])
 
-    summary = {}
-    if (export / "summary.json").is_file():
-        summary = json.loads((export / "summary.json").read_text(encoding="utf-8"))
-
-    account_zip = export / summary["account_zip"] if summary.get("account_zip") else None
-    if account_zip is not None and not account_zip.is_file():
-        account_zip = None
-
-    result = {
-        "session": str(session),
-        "export": str(export),
-        "accountZip": str(account_zip) if account_zip else "",
-        "playerUids": summary.get("player_uids", []),
-    }
-    write_state(dict(result, active=False,
-                     stoppedAt=dt.datetime.now().isoformat(timespec="seconds")))
-    log(f"采集结束 UID={result['playerUids']} 产物={result['accountZip'] or '无'}")
-    return result
+    result = result_from_export(export, session)
+    if result is None:
+        raise ValueError("解码未生成完整产物；原始抓包及已有输出已保留。")
+    return finalize_capture(result)
 
 
 def status() -> dict:
@@ -297,7 +361,7 @@ def status() -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip"])
+    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip", "recover"])
     parser.add_argument("--launcher", type=Path)
     parser.add_argument("--file", type=Path)
     parser.add_argument("--destination", type=Path)
@@ -314,7 +378,7 @@ def main() -> int:
         elif args.action == "start":
             result = start(args.launcher)
         else:
-            result = {"stop": stop, "status": status}[args.action]()
+            result = {"stop": stop, "status": status, "recover": recover}[args.action]()
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
