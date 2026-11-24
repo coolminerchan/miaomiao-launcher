@@ -135,6 +135,13 @@ def wait_capture_ready(process, ready_path: Path, timeout=40) -> dict:
     while time.monotonic() < deadline:
         code = process.poll()
         if code is not None:
+            error_path = ready_path.parent / "capture-worker.stderr.log"
+            detail = ""
+            if error_path.is_file():
+                lines = error_path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+                detail = next((line.strip() for line in lines if line.strip()), "")[:240]
+            if detail:
+                raise ValueError(f"抓包启动失败（{code}）：{detail}。公服未启动。")
             raise ValueError(f"抓包程序提前退出（{code}），公服未启动。请查看本次采集日志。")
         if ready_path.is_file():
             ready = json.loads(ready_path.read_text(encoding="utf-8-sig"))

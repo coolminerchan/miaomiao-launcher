@@ -94,6 +94,12 @@ class CaptureStartOrderTests(unittest.TestCase):
         spawn.assert_not_called()
     def test_wait_timeout_is_explicit(self):
         with self.assertRaises(ValueError):capture.wait_capture_ready(self.proc,self.runtime/'no-ready.json',timeout=0)
+    def test_failed_worker_reports_readable_first_error(self):
+        self.runtime.mkdir()
+        (self.runtime/'capture-worker.stderr.log').write_text('拒绝访问。需要管理员权限。\nsynthetic stack',encoding='utf-8')
+        self.proc.poll.return_value=5
+        with self.assertRaisesRegex(ValueError,'拒绝访问'):
+            capture.wait_capture_ready(self.proc,self.runtime/'capture-ready.json')
 
 
 if __name__=='__main__':unittest.main()

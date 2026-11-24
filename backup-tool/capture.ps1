@@ -15,6 +15,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
 if (-not $PSBoundParameters.ContainsKey('OutDir')) {
     $OutDir = Join-Path $PSScriptRoot 'output'
 }
@@ -42,11 +44,33 @@ if (-not $CleanupOnly) {
 }
 
 function Invoke-PacketMonitor([string[]]$CommandArgs) {
-    $result = & $pktmon @CommandArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "PktMon $($CommandArgs[0]) 失败（退出码 $LASTEXITCODE）。$($result -join ' ')"
-    }
-    $result
+    # PktMon emits UTF-8 even on a GBK PowerShell 5.1 host. Native '&' decoding
+    # can corrupt the idle-state text and falsely report an unknown active session.
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = $pktmon
+    $info.Arguments = (@($CommandArgs | ForEach-Object {
+        '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+    })) -join ' '
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $info.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $info
+    try {
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $text = $stdout.Result
+        $errorText = $stderr.Result
+        if ($process.ExitCode -ne 0) {
+            throw "PktMon $($CommandArgs[0]) 失败（退出码 $($process.ExitCode)）。$errorText $text"
+        }
+        $text -split '[\r\n]+' | Where-Object { $_ -ne '' }
+    } finally { $process.Dispose() }
 }
 
 function Get-PacketMonitorFilterState {

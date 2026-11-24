@@ -14,7 +14,7 @@ ALLOWED = {
     'README.md', 'requirements.txt', '.gitignore', 'privacy_check.py',
     'RELEASE-CHECKLIST.md', 'RELEASE-NOTES.md', 'test_backup_tool.py',
     'official_capture.py', 'official_import.py', 'test_official_import.py',
-    'official_launcher.py', 'test_official_launcher.py',
+    'official_launcher.py', 'test_official_launcher.py', 'test_pktmon_encoding.py',
     'docs/official-capture.md', 'docs/taptap-private.md',
     'client_identity.py', 'taptap_private_runner.py', 'taptap_private_agent.js', 'test_taptap_private.py',
     'docs/login-and-data.md', 'docs/release-audit.md', 'docs/channel-login.md', 'preflight.py',

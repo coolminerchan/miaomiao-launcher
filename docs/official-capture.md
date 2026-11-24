@@ -64,10 +64,16 @@ python official_capture.py status
 - 协议与端口按现有国服记录配置（TCP 11001–11004、21001、21002），渠道或版本变化时需要调整。
 - 官方客户端版本兼容性未在本次改动中实测，不保证所有版本可用。
 
+## PktMon 状态与错误排查
+
+PktMon 原生输出按 UTF-8 读取，不再依赖 PowerShell 5.1 宿主的 GBK 编码。否则中文“没有运行”可能被解码成乱码，导致安全检查误判为未知诊断会话。
+
+修复保留会话归属保护：只有可确认属于备份工具的旧会话和筛选器才允许清理，未知或其他工具的会话不会被停止。若仍失败，请查看界面显示的具体首行错误以及本次采集目录的 `capture-worker.stderr.log`，不要盲目执行全局 stop/filter remove。
+
 ## 测试
 
 ```powershell
-python -m unittest test_official_launcher test_official_import test_launcher -v
+python -m unittest test_pktmon_encoding test_official_launcher test_official_import test_launcher -v
 ```
 
 `test_official_import` 使用合成数据覆盖：采集 UID 优先、缺失时回退登录 UID、显示 UID 优先于内部 ID、冲突拒绝写入、导入后其他账号不受影响、ZIP 路径安全。
