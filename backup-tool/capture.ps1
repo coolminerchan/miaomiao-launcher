@@ -143,38 +143,66 @@ try {
         Invoke-PacketMonitor @('filter', 'add', "OFBackup_$port", '-t', 'TCP', '-p', "$port") | Out-Null
         $filtersAdded = $true
     }
-    Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $etl) | Out-Null
-    $started = $true
-    if ($ReadyPath) {
-        $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
-        [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
+    # PktMon buffers events until the trace stops, so a single long trace stays
+    # empty on disk until the very end. Rotate short traces instead: each stop
+    # flushes a finished segment, and the segments are concatenated into one
+    # pcapng (multi-section) so the live checklist can read real data.
+    $segmentSeconds = 12
+    $segment = 0
+    $first = $true
+    while ($true) {
+        $segment++
+        $segmentEtl = Join-Path $sessionPath ("segment_{0:d3}.etl" -f $segment)
+        Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $segmentEtl) | Out-Null
+        $started = $true
+        if ($first) {
+            $first = $false
+            if ($ReadyPath) {
+                $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
+                [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
+                Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
+            }
+            Write-Host "抓包已开始。输出目录 $sessionPath"
+            $observer = Join-Path (Split-Path $PSScriptRoot -Parent) 'capture_checklist.py'
+            if ($Mode -eq 'Account' -and $StopFlag -and (Test-Path -LiteralPath $observer)) {
+                $liveDir = Join-Path $sessionPath 'live-progress'
+                New-Item -ItemType Directory -Path $liveDir -Force | Out-Null
+                try {
+                    $arguments = '-B -X utf8 "' + $observer + '" watch --capture-root "' + $sessionPath + '"'
+                    $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
+                } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
+            }
+            if ($Mode -eq 'Account') {
+                Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
+                Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
+                Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
+            } else {
+                Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
+            }
+        }
+        $offset = 0
+        while ($offset -lt $segmentSeconds) {
+            if ($AutoStopSeconds -gt 0 -and ($segment - 1) * $segmentSeconds + $offset -ge $AutoStopSeconds) { break }
+            if ($StopFlag -and (Test-Path -LiteralPath $StopFlag)) { break }
+            Start-Sleep -Milliseconds 500
+            $offset += 0.5
+        }
+        Invoke-PacketMonitor @('stop') | Out-Null
+        $started = $false
+        if (Test-Path -LiteralPath $segmentEtl -PathType Leaf) {
+            $segmentPcap = Join-Path $sessionPath ("segment_{0:d3}.pcapng" -f $segment)
+            Invoke-PacketMonitor @('etl2pcap', $segmentEtl, '--out', $segmentPcap) | Out-Null
+            if ((Test-Path -LiteralPath $segmentPcap) -and (Get-Item -LiteralPath $segmentPcap).Length -gt 256) {
+                # Appending pcapng sections keeps every segment readable by TShark.
+                $bytes = [IO.File]::ReadAllBytes($segmentPcap)
+                $stream = [IO.File]::Open($pcap, 'Append', 'Write', 'ReadWrite')
+                try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+            }
+        }
+        $done = $AutoStopSeconds -gt 0 -and ($segment * $segmentSeconds) -ge $AutoStopSeconds
+        $stopped = $StopFlag -and (Test-Path -LiteralPath $StopFlag)
+        if ($done -or $stopped) { break }
     }
-
-    Write-Host "抓包已开始。输出目录 $sessionPath"
-    $observer = Join-Path (Split-Path $PSScriptRoot -Parent) 'capture_checklist.py'
-    if ($Mode -eq 'Account' -and $StopFlag -and (Test-Path -LiteralPath $observer)) {
-        $liveDir = Join-Path $sessionPath 'live-progress'
-        New-Item -ItemType Directory -Path $liveDir -Force | Out-Null
-        try {
-            $arguments = '-B -X utf8 "' + $observer + '" watch --capture-root "' + $sessionPath + '"'
-            $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
-        } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
-    }
-    if ($Mode -eq 'Account') {
-        Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
-        Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
-        Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
-    } else {
-        Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
-    }
-    if ($AutoStopSeconds -gt 0) { Start-Sleep -Seconds $AutoStopSeconds }
-    elseif ($StopFlag) {
-        $deadline = (Get-Date).AddHours(4)
-        while (-not (Test-Path -LiteralPath $StopFlag) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-        if (-not (Test-Path -LiteralPath $StopFlag)) { Write-Host '等待结束信号超时，按正常流程收尾。' }
-    }
-    else { [void](Read-Host '操作完毕后，回到本窗口按回车') }
 } finally {
     if (Test-Path -LiteralPath $sessionPath) {
         New-Item -ItemType File -Path $liveStop -Force | Out-Null
@@ -189,10 +217,11 @@ try {
     }
 }
 
-if (-not (Test-Path -LiteralPath $etl -PathType Leaf)) {
-    throw "找不到抓包文件 $etl"
+if (-not (Test-Path -LiteralPath $pcap -PathType Leaf)) {
+    $segments = @(Get-ChildItem -LiteralPath $sessionPath -Filter 'segment_*.pcapng' -ErrorAction SilentlyContinue)
+    if ($segments.Count -eq 0) { throw "没有采集到任何数据包：请确认登录公服后确实进入了游戏场景。" }
+    throw "找不到合并后的抓包文件 $pcap"
 }
-Invoke-PacketMonitor @('etl2pcap', $etl, '--out', $pcap) | Out-Null
 $scriptName = if ($Mode -eq 'Account') { 'parse_pcap.py' } else { 'extract_gardens.py' }
 $env:PYTHONUTF8 = '1'
 & $python -B -X utf8 (Join-Path $PSScriptRoot $scriptName) $pcap --out $export

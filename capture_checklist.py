@@ -77,7 +77,7 @@ def observe(name, body, counts, empty):
     if key and not body.get(key):empty[name]+=1
 
 
-def report(counts=None, empty=None, *, phase='idle', readable=False, warning='', updated=None):
+def report(counts=None, empty=None, *, phase='idle', readable=False, warning='', updated=None, live_packets=None):
     counts=counts or {};empty=empty or {}
     final=phase=='complete'
     items=[]
@@ -90,7 +90,8 @@ def report(counts=None, empty=None, *, phase='idle', readable=False, warning='',
         items.append({'id':key,'label':label,'state':state,'status':STATES[state],
                       'count':count,'evidence':evidence,'hint':hint})
     return {'phase':phase,'readable':readable,'updatedAt':updated or dt.datetime.now().isoformat(timespec='seconds'),
-            'warning':warning,'items':items,'counts':dict(counts),'emptyCounts':dict(empty)}
+            'warning':warning,'items':items,'counts':dict(counts),'emptyCounts':dict(empty),
+            'livePackets':live_packets}
 
 
 def final_report(export):
@@ -149,39 +150,93 @@ def scan_pcap(decoder,path,stop=None):
     return counts,empty,len(streams)
 
 
+def read_packet_counters():
+    """Total packets seen by the running PktMon session, or None if unavailable."""
+    pktmon = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/PktMon.exe'
+    try:
+        process = subprocess.Popen([str(pktmon), 'counters'], stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        raw, _ = process.communicate(timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if process.returncode:
+        return None
+    text = raw.decode('utf-8', errors='replace')
+    total = 0
+    for line in text.splitlines():
+        fields = [part.strip() for part in line.split('|')]
+        if len(fields) != 2:
+            continue
+        for side in fields:
+            values = re.findall(r'[\d,]{1,15}', side)
+            if len(values) >= 2:
+                try:
+                    total += int(values[0].replace(',', ''))
+                except ValueError:
+                    pass
+    return total or None
+
+
+def snapshot_pcap(decoder, etl, live):
+    """Convert a copy of the live ETL; return (state, pcap). Never touches the session."""
+    with tempfile.TemporaryDirectory(prefix='snapshot-', dir=live) as temporary:
+        copied = Path(temporary) / 'capture.etl'
+        pcap = copied.with_suffix('.pcapng')
+        shutil.copyfile(etl, copied)
+        pktmon = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/PktMon.exe'
+        result = subprocess.run([str(pktmon), 'etl2pcap', str(copied), '--out', str(pcap)],
+                                capture_output=True, timeout=20,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        if result.returncode or not pcap.is_file():
+            return 'unreadable', None
+        if pcap.stat().st_size <= 256:
+            return 'buffered', None
+        if not decoder.list_tcp_streams(pcap):
+            return 'buffered', None
+        return 'readable', pcap
+
+
 def watch(capture_root):
-    root=Path(capture_root).resolve();live=root/'live-progress';live.mkdir(exist_ok=True)
-    stop=root/'live-progress-stop.flag';target=live/'progress.json'
-    counts=Counter();empty=Counter();readable=False
-    atomic_json(target,report(phase='capturing',warning='正在等待可读取的抓包快照。'))
-    decoder=load_decoder(BASE/'backup-tool')
-    deadline=time.monotonic()+4*3600
-    while not stop.is_file() and time.monotonic()<deadline:
-        warning=''
+    """Read finished segments only. Each segment is flushed when its trace stops."""
+    root = Path(capture_root).resolve(); live = root / 'live-progress'; live.mkdir(exist_ok=True)
+    stop = root / 'live-progress-stop.flag'; target = live / 'progress.json'
+    counts = Counter(); empty = Counter(); readable = False
+    scanned = set(); notice = '正在等待第一个落盘分段。'
+    atomic_json(target, report(phase='capturing', warning=notice))
+    decoder = load_decoder(BASE / 'backup-tool')
+    deadline = time.monotonic() + 4 * 3600
+    while not stop.is_file() and time.monotonic() < deadline:
+        live_packets = read_packet_counters()
         try:
-            etl=root/'capture.etl'
-            if not etl.is_file() or etl.stat().st_size<1024:raise ValueError('trace not ready')
-            if etl.stat().st_size>256*1024*1024:raise ValueError('snapshot size limit')
-            with tempfile.TemporaryDirectory(prefix='snapshot-',dir=live) as temporary:
-                copied=Path(temporary)/'capture.etl';pcap=copied.with_suffix('.pcapng')
-                # Copy the current ETL without locking or stopping the live trace.
-                shutil.copyfile(etl,copied)
-                pktmon=Path(os.environ.get('SystemRoot',r'C:\Windows'))/'System32/PktMon.exe'
-                result=subprocess.run([str(pktmon),'etl2pcap',str(copied),'--out',str(pcap)],capture_output=True,
-                                      timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                if result.returncode or not pcap.is_file():raise ValueError('unfinished trace cannot yet convert')
-                found,zero,streams=scan_pcap(decoder,pcap,stop)
-                if not streams:raise ValueError('no readable game stream in current snapshot')
-                readable=True
-                for key,value in found.items():
-                    if value>=counts[key]:counts[key]=value;empty[key]=zero[key]
-        except (OSError,ValueError,RuntimeError,subprocess.SubprocessError):
-            warning='当前抓包快照暂不可读取；已确认项目保留，结束采集后会按完整输出核对。'
-        if stop.is_file():break
-        atomic_json(target,report(counts,empty,phase='capturing',readable=readable,warning=warning))
-        for _ in range(10):
-            if stop.is_file():break
-            time.sleep(.5)
+            segments = sorted(root.glob('segment_*.pcapng'))
+            fresh = [p for p in segments if p.name not in scanned and p.stat().st_size > 256]
+            for path in fresh:
+                found, zero, streams = scan_pcap(decoder, path, stop)
+                scanned.add(path.name)
+                if streams:
+                    readable = True
+                    for key, value in found.items():
+                        counts[key] += value
+                        empty[key] += zero[key]
+            if readable:
+                notice = ''
+            elif fresh:
+                notice = '分段已落盘，但其中没有识别到游戏协议包；请确认登录后进入了场景。'
+            elif live_packets:
+                notice = ('PktMon 已记录 ' + format(live_packets, ',') + ' 个数据包；'
+                          '当前分段仍在缓冲，约十多秒后写入磁盘即可核对。')
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            notice = '分段读取暂时失败，稍后自动重试；原始数据不受影响。'
+        if stop.is_file():
+            break
+        atomic_json(target, report(counts, empty, phase='capturing', readable=readable,
+                                   warning=notice, live_packets=live_packets))
+        waited = 0.0
+        while waited < 3.0:
+            if stop.is_file():
+                break
+            time.sleep(0.5); waited += 0.5
 
 
 def progress(state):
