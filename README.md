@@ -4,10 +4,13 @@ Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、�
 
 ## 当前更新状态（2026-11-24）
 
-**`v1.1.3` 为当前版本，程序版本 `1.1.3.0`。**
+**`v1.1.4` 为当前版本，程序版本 `1.1.4.0`。**
+
+本版最重要的修复：**导入账号后私服无法进入（服务端报 `Mismatch type bool with value number`）**。导入器把 `isUnLock` 等布尔字段写成了数字 `1`，服务端反序列化失败导致 `player is nil`。现已按模型定义输出真正的 `true` / `false`。
 
 本版相对 `v1.1.0` 的变化：
 
+- **修复布尔字段被写成数字**，导入后私服可正常登录（`isUnLock`、`isLock` 等 10 个布尔字段）。
 - **公服专用启动器路径**（`officialLauncherPath`）与私服 `gameRoot` 完全独立，互不覆盖。
 - **抓包就绪后自动打开公服**；抓包初始化失败或超时不会启动游戏。
 - **结束采集先另存账号 ZIP 交付用户**，再选择是否入库；取消或 UID 冲突不影响已保存的 ZIP。
@@ -24,13 +27,13 @@ Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、�
 | 采集后入库 | 核对 UID、提示存档冲突与解码完整性，用户确认后写入 |
 | TapTap 下载客户端 | 实验性 QuickSDK PC 本地私服适配，限定已验证版本和 GameAssembly 哈希 |
 | 客户端副本与存档 | 按来源指纹隔离副本，来源变化时备份旧副本，不重置账号数据库 |
-| 已运行测试 | 72 项自动化测试通过，含导入容错、采集完成恢复与 UI 布局验证 |
-| 当前版本 | **`v1.1.3` / 程序 1.1.3.0** |
-| 历史版本 | `v1.1.0`、`v1.0.0` 保留，不含本版修复 |
+| 已运行测试 | 75 项自动化测试通过，含布尔序列化、导入容错、采集完成恢复与 UI 布局验证 |
+| 当前版本 | **`v1.1.4` / 程序 1.1.4.0** |
+| 历史版本 | `v1.1.3`、`v1.1.0`、`v1.0.0` 保留 |
 
 最新实现见 [主干代码](https://github.com/inori-dream/miaomiao-launcher/tree/main)、[公服采集说明](docs/official-capture.md) 和 [TapTap 私服适配说明](docs/taptap-private.md)。
 
-免配置下载请使用 [v1.1.3 发布页](https://github.com/inori-dream/miaomiao-launcher/releases/tag/v1.1.3) 的 `OverFieldLauncher-portable.zip`。GitHub 的 Code → Download ZIP 下载的是源码，不是免环境的可运行安装包。
+免配置下载请使用 [v1.1.4 发布页](https://github.com/inori-dream/miaomiao-launcher/releases/tag/v1.1.4) 的 `OverFieldLauncher-portable.zip`。GitHub 的 Code → Download ZIP 下载的是源码，不是免环境的可运行安装包。
 
 TapTap 适配目前验证了本地登录；场景渲染、持续游玩、其他客户端版本和联机模式尚未完整验证。公服采集仍须通过原版客户端正常认证，本地 UID 登录不会替代公服认证。
 
