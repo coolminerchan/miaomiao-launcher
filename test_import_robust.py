@@ -38,7 +38,7 @@ class RobustImportTests(unittest.TestCase):
     def run_import(self, path, uid=0, allow=False, replace=True):
         return capture_import.import_capture(path, self.profile, uid, replace, allow)
 
-    def placeholder_main(self, uid=4312647, label=4312647):
+    def placeholder_main(self, uid=7654321, label=7654321):
         return {
             "status": "StatusCode_OK", "player_id": uid, "player_label": label,
             "player_name": "Synthetic", "level": 42,
