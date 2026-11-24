@@ -310,12 +310,31 @@ namespace OverFieldLocal
             }
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server-kit");
         }
+        public static string UnsupportedChannel(string clientExe)
+        {
+            // Packages that authenticate through their own SDK never load PCGameSDK.dll,
+            // so swapping that DLL cannot move them to a private server.
+            if (String.IsNullOrEmpty(clientExe)) return null;
+            var plugins = Path.Combine(Path.GetDirectoryName(clientExe), "launcher_Data", "Plugins", "x86_64");
+            if (!Directory.Exists(plugins)) return null;
+            if (File.Exists(Path.Combine(plugins, "PCGameSDK.dll"))) return null;
+            if (File.Exists(Path.Combine(plugins, "tapsdkcore.dll")) || File.Exists(Path.Combine(plugins, "taptap_api.dll")))
+                return "TapTap";
+            return null;
+        }
         public void ValidateRoot(string root)
         {
             string server = FindServer(root);
             foreach (var path in new[] { Path.Combine(server, "Lolo.exe"), Path.Combine(server, "config.json") })
                 if (!File.Exists(path))
                     throw new InvalidOperationException("所选目录缺少服务端：" + path + "\n请选择包含 LoloServer 的上层目录，或把服务端放到启动器旁边的 server-kit 文件夹。");
+            string client = FindClient(root);
+            string channel = UnsupportedChannel(client);
+            if (channel != null)
+                throw new InvalidOperationException(
+                    "这是 " + channel + " 渠道包，无法用本地 UID 登录私服。\n"
+                    + "它的登录走 " + channel + " 自己的 SDK，不会加载 PCGameSDK.dll，所以替换无效。\n"
+                    + "请改用 bilibili PC 客户端（含 PCGameSDK.dll 的版本）。");
         }
         public Dictionary<string, object> Official(string action, string extra = "")
         {
