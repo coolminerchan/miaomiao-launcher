@@ -16,6 +16,29 @@
 - 启动器组件包：包含 EXE、SDK、图标、核心脚本和文档；需自行提供 Python 3.12、合法来源的服务程序/资源，单机模式还需兼容的本地 PC 客户端。不是完整游戏客户端或解压即玩的私服包。
 - Windows 玩家备份工具：独立完整附件，含便携 Python、TShark 与解码依赖，用于本人账号备份；不能凭 UID 自动获取官服数据。
 
+## 下载启动器
+
+在本页底部 **Assets** 区域点击下载（国内网络打不开 GitHub 时，可让朋友下载后传给你）：
+
+- **OverFieldLauncher-components.zip** —— 启动器本体，先下这个
+- [直接下载启动器组件包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverFieldLauncher-components.zip)
+- [直接下载完整源码](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverFieldLauncher-source.zip)
+- [直接下载 Windows 玩家备份工具](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverField-Backup-Windows.zip)
+
+**使用步骤**
+
+1. 完整解压组件包到可写目录，例如 `D:\Games\OverFieldLauncher`，不要在压缩包里直接双击运行。
+2. 安装 Python 3.12 x64，安装时勾选“Add python.exe to PATH”。
+3. 准备服务资源：从合法来源取得 `Lolo.exe`、`config.json`、`data\`、`Resource\` 与数据库架构，放进启动器目录下的 `server-kit\` 文件夹。
+4. 双击 `OverFieldLauncher.exe`。单机模式先点“更改目录”选中本地 PC 客户端；局域网模式选择本机局域网地址后发布。
+5. 首次启动前可执行 `python preflight.py --mode host` 检查缺项，退出码 0 表示文件与数据库架构齐全。
+
+组件包不含 Python、服务程序、游戏资源与游戏客户端，**不是解压即玩的完整私服包**；单机模式需要兼容版本的本地客户端（现有适配为 1.1.12）。
+
+## 各文件说明
+
+仓库中每个文件都有独立提交与用途说明，可在 [提交记录](https://github.com/inori-dream/miaomiao-launcher/commits/main) 逐条查看。`Launcher.cs` 是主界面与服务控制，`SeasideUI.cs` 是界面布局，`World-Control.ps1` 负责服务启停，`capture_import.py` 负责抓包导入，`backup-tool/` 是玩家数据备份工具。
+
 ## 账号与隐私
 
 不附带作者真实 UID、账号凭据、个人存档、抓包、数据库或管理密钥。新模式只创建空数据库架构，个人资料必须由用户明确导入。默认 UID 是本地占位值，并非附送账号。
