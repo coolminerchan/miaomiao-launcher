@@ -22,13 +22,26 @@ cmd /c build_sdk.cmd
 `build_sdk.cmd` 默认使用 VS 2022 Community 的工具环境；其他安装版本请调整该脚本。
 启动器核心脚本使用 Python 3.12 标准库，不需要在线代理或 `mitmproxy` 才能启动本地 UID 服务。`requirements.txt` 的 `mitmproxy` 用于旧重定向脚本和相关回归测试；安装测试依赖可执行 `python -m pip install -r requirements.txt`。发布包不捆绑启动器的 Python。备份工具使用独立 Python/Protobuf/Cramjam 环境，见其说明。
 
-## 下载后是否完整可运行
+## 下载方式
 
-- **源码包**：开发用，需要按构建说明编译，并自行提供依赖和合法服务资源。
-- **启动器组件包**：含编译好的 EXE、SDK、脚本、图标与完整说明；不包含 Python、Lolo 服务程序、服务资源或游戏客户端，**不是解压即玩的完整私服发行包**。
-- **Windows 备份工具包**：独立附件包含 Python/TShark/解码依赖，用于本人数据备份；不会替启动器提供服务端和游戏资源。
+Release 页提供两种包，按需要选：
 
-首次启动前安装 Python 3.12 x64（标准安装位置或加入 PATH），提供服务资源，再运行只读检查：
+**免配置完整版 `OverFieldLauncher-portable.zip`（推荐，35.6 MB）**
+
+解压即可运行，**自带 Python 运行时、服务端程序、服务资源与数据库模板**，不需要安装 Python，不需要准备任何资源文件：
+
+1. 下载并右键「全部解压」到任意可写目录
+2. 双击 `OverFieldLauncher.exe`
+
+局域网服务可直接发布；单机模式仍需点「更改目录」选择自己本地兼容的游戏客户端（现有适配 B 站 PC 版 1.1.12），游戏本体不随包分发。
+
+**组件包与源码（开发或自定义用）**
+
+- **启动器组件包**：含 EXE、SDK、脚本、图标与文档；不含 Python、服务程序与资源，需自行准备。
+- **源码包**：开发用，需按构建说明编译。
+- **Windows 备份工具包**：独立附件，含 Python/TShark/解码依赖，用于本人账号数据备份。
+
+使用组件包时，首次启动前需安装 Python 3.12 x64 并提供服务资源，再运行只读检查：
 
 ```powershell
 python preflight.py --mode host
