@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet('Start','Stop','Status','Backup')][string]$Action = 'Status',
     [string]$GameRoot = '',
@@ -56,6 +56,29 @@ function Test-Port([string]$Address, [int]$Port) {
     $taskSocket = [Net.Sockets.TcpClient]::new()
     try { $taskConnect=$taskSocket.ConnectAsync($Address,$Port); return $taskConnect.Wait(800) -and $taskSocket.Connected }
     catch { return $false } finally { $taskSocket.Dispose() }
+}
+function Test-Ports([object[]]$Targets, [int]$TimeoutMilliseconds = 250) {
+    # A closed port always burns the full timeout, so probe all of them at once
+    # instead of paying that cost three times in a row.
+    $sockets = @()
+    $tasks = @()
+    foreach ($target in $Targets) {
+        $socket = [Net.Sockets.TcpClient]::new()
+        $sockets += $socket
+        try { $tasks += ,$socket.ConnectAsync([string]$target[0], [int]$target[1]) }
+        catch { $tasks += ,$null }
+    }
+    $waits = @()
+    foreach ($task in $tasks) { if ($null -ne $task) { $waits += $task.AsyncWaitHandle } }
+    if ($waits.Count -gt 0) {
+        [Threading.WaitHandle]::WaitAny([Threading.WaitHandle[]]$waits, $TimeoutMilliseconds) | Out-Null
+    }
+    $results = @()
+    for ($i = 0; $i -lt $sockets.Count; $i++) {
+        $results += (($null -ne $tasks[$i]) -and $sockets[$i].Connected)
+    }
+    foreach ($socket in $sockets) { try { $socket.Dispose() } catch { } }
+    return $results
 }
 function Process-Matches($Record) {
     if (-not $Record) { return $false }
@@ -132,12 +155,13 @@ function Invoke-World {
     if ($Action -eq 'Status') {
         $taskCurrent=Get-ItemProperty -LiteralPath $taskRegistry
         $taskSame=$taskState -and $taskState.Active -and $taskState.Mode -eq $Mode -and $taskState.Target -eq $taskTarget
-        $taskHttpUp=Test-Port $taskTarget $taskHttp
-        $taskGateUp=Test-Port $taskTarget $taskGateway
+        $taskProbes=Test-Ports @(@($taskTarget,$taskHttp),@($taskTarget,$taskGateway),@('127.0.0.1',$taskAdminPort))
+        $taskHttpUp=$taskProbes[0]
+        $taskGateUp=$taskProbes[1]
         $taskFirewall=$false
         if ($Mode -eq 'host') { try { $taskFirewall=@(Get-NetFirewallRule -Name 'OverFieldLocal-LAN','OverFieldLocal-LAN-Gateway' -ErrorAction Stop | Where-Object { $_.Enabled -eq 'True' }).Count -eq 2 } catch { } }
         [pscustomobject]@{
-            HttpListening=$taskHttpUp; GatewayListening=$taskGateUp; ProxyListening=Test-Port '127.0.0.1' $taskAdminPort
+            HttpListening=$taskHttpUp; GatewayListening=$taskGateUp; ProxyListening=$taskProbes[2]
             ServerRunning=$taskSame -and (Process-Matches $taskState.Server)
             ServerRequired=$true; ProxyRunning=$taskSame -and (Process-Matches $taskState.Gateway)
             ProxyEnabled=$taskSame -and (Process-Matches $taskState.Gateway)

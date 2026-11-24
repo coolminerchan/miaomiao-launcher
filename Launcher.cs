@@ -638,7 +638,7 @@ namespace OverFieldLocal
         async Task SwitchMode(string mode)
         {
             if(busy || backend.Mode==mode) return;
-            while(checking && !closing) await Task.Delay(50);
+            {int guard=0;while(checking && !closing && guard++<40) await Task.Delay(50);}
             if(closing) return;
             if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再切换运行模式。"); return; }
             if(lastStatus!=null && !String.IsNullOrEmpty(lastStatus.RuntimeMode)) await Operate("Stop",false);
@@ -650,7 +650,7 @@ namespace OverFieldLocal
         async Task ImportCapture()
         {
             if(busy) return;
-            while(checking && !closing) await Task.Delay(50);
+            {int guard=0;while(checking && !closing && guard++<40) await Task.Delay(50);}
             if(closing) return;
             if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再导入角色数据。"); return; }
             string path;
