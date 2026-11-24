@@ -1,0 +1,31 @@
+﻿Third-party components
+
+Python 3.13.17 for Windows x64
+Python Software Foundation license and bundled notices are in tools\python\LICENSE.txt.
+https://www.python.org/downloads/release/python-31317/
+
+Protobuf 7.35.1 and Cramjam 2.11.0
+Upstream wheels from PyPI. Their licenses are included in the corresponding dist-info directories under tools\python\Lib\site-packages.
+https://pypi.org/project/protobuf/7.35.1/
+https://pypi.org/project/cramjam/2.11.0/
+
+TShark 4.6.10 for Windows x64
+Unmodified TShark, required DLLs and notices are extracted from the official Wireshark x64 installer. GPL version 2 or later. See tools\tshark\COPYING.txt and UPSTREAM-README.txt.
+https://www.wireshark.org/download.html
+Corresponding source archive
+https://2.na.dl.wireshark.org/src/wireshark-4.6.10.tar.xz
+Official release checksums
+https://www.wireshark.org/download/SIGNATURES-4.6.10.txt
+
+Microsoft Visual C++ Redistributable for x64
+The intact, Microsoft-signed redistributable included in the official Wireshark x64 installer. Used only where the system needs the Visual C++ runtime.
+https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
+
+Packet ID and protocol files
+proto_gen\cmdid.csv is from BanterSR/Lolo at 8b621917e8acca5b6e56fd43d04a355a8c11903d.
+proto_gen\msg_id.txt and the schema compiled into net_pb2.py are from byzp/of-ps at fa2142b8521e802beb23fc6ed538205b9f4f1513. Repository licenses are in proto_gen.
+https://github.com/BanterSR/Lolo/tree/8b621917e8acca5b6e56fd43d04a355a8c11903d/protocol
+https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513
+
+Windows PktMon is supplied by Windows.
+https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon-syntax
