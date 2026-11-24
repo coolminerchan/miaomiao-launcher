@@ -53,8 +53,36 @@ def read_state() -> dict:
 
 
 def python_exe() -> Path:
-    bundled = BASE / "runtime-python" / "python.exe"
-    return bundled if bundled.is_file() else Path(sys.executable)
+    """Pick an interpreter that can actually decode captures.
+
+    runtime-python ships this launcher's own deps and has neither cramjam nor
+    protobuf, so decoding with it fails after capture. Prefer the tool's own
+    interpreter, which carries the decode stack.
+    """
+    candidates = (
+        BASE / "backup-tool" / "tools" / "python" / "python.exe",
+        BASE / "tools" / "python" / "python.exe",
+        BASE / "runtime-python" / "python.exe",
+    )
+    for candidate in candidates:
+        if candidate.is_file() and can_decode(candidate):
+            return candidate
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return Path(sys.executable)
+
+
+def can_decode(python: Path) -> bool:
+    """True when this interpreter can import the modules parse_pcap.py needs."""
+    try:
+        result = subprocess.run(
+            [str(python), "-B", "-c", "import cramjam, google.protobuf"],
+            capture_output=True, timeout=60, creationflags=NO_WINDOW,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def tshark_exe() -> Path:
