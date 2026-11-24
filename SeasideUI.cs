@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -54,7 +54,7 @@ namespace OverFieldLocal
             PerformLayout();var errors=new List<string>();AuditUI(this,errors);
             string stem=backend.Mode+"-"+ClientSize.Width+"x"+ClientSize.Height;
             using(var bitmap=new Bitmap(Width,Height)){DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height));bitmap.Save(Path.Combine(directory,stem+".png"));}
-            File.WriteAllText(Path.Combine(directory,stem+".json"),new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"mode",backend.Mode},{"size",ClientSize.ToString()},{"layoutErrors",errors},{"checked","Button text fit, interactive sibling overlap, child bounds; no game/service operations"}}));
+            File.WriteAllText(Path.Combine(directory,stem+".json"),new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"mode",backend.Mode},{"page",capturePage != null && capturePage.Visible ? "capture" : "world"},{"size",ClientSize.ToString()},{"layoutErrors",errors},{"checked","Button text fit, interactive sibling overlap, child bounds; no game/service operations"}}));
         }
         void AuditUI(Control parent,List<string> errors)
         {

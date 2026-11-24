@@ -13,6 +13,12 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
+[assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
+[assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
+
 namespace OverFieldLocal
 {
     static class Program
@@ -528,7 +534,15 @@ namespace OverFieldLocal
             timer.Interval = 5000; timer.Tick += async delegate { await RefreshStatus(); };
             Shown += async delegate
             {
-                if(uiPreview) { await Task.Delay(400); if(uiPage=="capture") ShowCapturePage(true); await Task.Delay(150); SaveUIPreview(uiPreviewDir); Close(); return; }
+                if(uiPreview) {
+                    await Task.Delay(400);
+                    if(uiPage=="capture" || uiPage=="capture-return") ShowCapturePage(true);
+                    if(uiPage=="capture-return") {
+                        await SwitchMode(backend.Mode);
+                        if(capturePage.Visible) { Environment.ExitCode=2; Close(); return; }
+                    }
+                    await Task.Delay(150); SaveUIPreview(uiPreviewDir); Close(); return;
+                }
                 Append("启动器已就绪，正在读取本地服务状态。");
                 await RefreshStatus(); if (closing) return; timer.Start();
                 if (verify) await Verify();
@@ -659,7 +673,8 @@ namespace OverFieldLocal
         }
         async Task SwitchMode(string mode)
         {
-            if(busy || backend.Mode==mode) return;
+            if(busy || closing) return;
+            if(backend.Mode==mode) { ShowCapturePage(false); ApplyMode(); return; }
             // Claim busy before any await: rapid clicks otherwise start several switch
             // chains at once, and their Stop/Refresh interleave into a stalled UI.
             busy = true;

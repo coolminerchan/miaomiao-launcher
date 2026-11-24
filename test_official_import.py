@@ -11,7 +11,7 @@ import zipfile
 from contextlib import closing
 from pathlib import Path
 
-REPO = Path(r"E:\工作区\miaomiao-capture-branch")
+REPO = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO))
 
 import capture_import
@@ -141,13 +141,13 @@ class OfficialImportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 official_import.read_identity(bad)
 
-    def test_real_capture_identity(self):
-        real = Path(r"E:\工作区\开放空间数据导出\完整抓包_20261123_2052.zip")
-        if not real.is_file():
-            self.skipTest("real capture not available")
-        player, entries = official_import.read_identity(real)
-        self.assertEqual(official_import.captured_uid(player), 4018110)
-        self.assertEqual(len(player.get("characters", [])), 29)
+    def test_capture_identity_without_personal_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = make_zip(Path(directory) / "account_Test_777.zip", main_data(777))
+            player, entries = official_import.read_identity(source)
+            self.assertEqual(official_import.captured_uid(player), 777)
+            self.assertEqual(len(player.get("characters", [])), 1)
+            self.assertEqual(len(entries["PlayerMainDataRsp"]), 1)
 
 
 if __name__ == "__main__":
