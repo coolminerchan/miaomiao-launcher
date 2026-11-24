@@ -14,6 +14,7 @@ ALLOWED = {
     'README.md', 'requirements.txt', '.gitignore', 'privacy_check.py',
     'RELEASE-CHECKLIST.md', 'RELEASE-NOTES.md', 'test_backup_tool.py',
     'official_capture.py', 'official_import.py', 'test_official_import.py',
+    'capture_checklist.py', 'test_capture_checklist.py', 'test_wifi_compat.py',
     'official_launcher.py', 'test_official_launcher.py', 'test_pktmon_encoding.py',
     'capture_zip.py', 'test_capture_zip.py', 'test_capture_completion.py', 'test_import_robust.py', 'schema_restore.py', 'test_bool_fields.py',
     'docs/official-capture.md', 'docs/taptap-private.md',
@@ -24,6 +25,9 @@ ALLOWED = {
     'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py',
     'backup-tool/README.md', 'backup-tool/requirements.txt',
     'backup-tool/THIRD-PARTY.txt', 'backup-tool/使用说明.txt',
+    'backup-tool/VERSION', 'backup-tool/RELEASE-NOTES.txt', 'backup-tool/pcap_compat.py',
+    'backup-tool/Redirect.py', 'backup-tool/start_proxy.ps1', 'backup-tool/INTEGRATION.json',
+    'backup-tool/UPSTREAM-MANIFEST.sha256',
     'backup-tool/4_import_player.cmd', 'backup-tool/import_to_ofps.py',
     'backup-tool/proto_gen/cmdid.csv', 'backup-tool/proto_gen/msg_id.txt',
     'backup-tool/proto_gen/net_pb2.py',
@@ -48,6 +52,8 @@ def main():
         parts = relative.parts
         if parts[0] == '.git' or '__pycache__' in parts:
             continue
+        if parts[:2] == ('backup-tool', 'tools'):
+            continue  # Git-ignored vendor runtime; verified against the upstream bundle manifest.
         if relative.as_posix() not in ALLOWED | GENERATED:
             errors.append(f'Unexpected file: {path.relative_to(ROOT)}')
             continue

@@ -250,6 +250,11 @@ def finalize_capture(result, recovered=False):
     final.update(active=False, phase="complete", recovered=recovered,
                  stoppedAt=dt.datetime.now().isoformat(timespec="seconds"))
     final.pop("error", None)
+    try:
+        from capture_checklist import atomic_json, final_report
+        atomic_json(Path(result["export"]) / "capture-checklist.json", final_report(result["export"]))
+    except (OSError, ValueError, TypeError) as error:
+        log("采集清单最终核对暂不可用：" + str(error))
     write_state(final)
     log("采集产物已确认，账号ZIP可另存交付。")
     return result
@@ -361,13 +366,16 @@ def status() -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip", "recover"])
+    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip", "recover", "progress"])
     parser.add_argument("--launcher", type=Path)
     parser.add_argument("--file", type=Path)
     parser.add_argument("--destination", type=Path)
     args = parser.parse_args()
     try:
-        if args.action == "export-zip":
+        if args.action == "progress":
+            from capture_checklist import progress
+            result = progress(read_state())
+        elif args.action == "export-zip":
             if args.file is None or args.destination is None:
                 raise ValueError("请选择要交付的账号ZIP及保存位置。")
             from capture_zip import export_account_zip

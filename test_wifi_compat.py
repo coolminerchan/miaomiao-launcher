@@ -1,0 +1,51 @@
+"""Upstream 1.0.9 Wi-Fi compatibility regression fixtures; no real user packets."""
+import hashlib
+from pathlib import Path
+import struct
+import sys
+import tempfile
+import unittest
+sys.path.insert(0,str(Path(__file__).resolve().parent/'backup-tool'))
+from pcap_compat import prepare_capture
+
+
+def block(kind,body):
+    body+=b'\0'*((-len(body))%4);size=len(body)+12
+    return struct.pack('<II',kind,size)+body+struct.pack('<I',size)
+
+
+def capture(packets):
+    header=block(0x0a0d0d0a,struct.pack('<IHHq',0x1a2b3c4d,1,0,-1))
+    header+=block(1,struct.pack('<HHI',1,0,65535))
+    for packet in packets:
+        header+=block(6,struct.pack('<IIIII',0,0,0,len(packet),len(packet))+packet)
+    return header
+
+
+def wifi(protected=True):
+    control=0x4008 if protected else 8
+    return struct.pack('<H',control)+b'\0'*22+b'\xaa\xaa\x03\0\0\0\x08\0'+b'\0'*8
+
+class WifiCompatTests(unittest.TestCase):
+    def test_wifi_corrected_copy_preserves_original(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'capture.pcapng';raw=capture([wifi()]);source.write_bytes(raw)
+            result=prepare_capture(source)
+            self.assertNotEqual(result,source);self.assertEqual(source.read_bytes(),raw)
+            changed=result.read_bytes()
+            self.assertEqual(struct.unpack_from('<H',changed,36)[0],105)
+            self.assertEqual(changed[77]&0x40,0)
+    def test_ethernet_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'ethernet.pcapng';source.write_bytes(capture([b'\0'*60]))
+            self.assertEqual(prepare_capture(source),source)
+    def test_mixed_interface_is_not_guessed_as_wifi(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'mixed.pcapng';raw=capture([wifi(),b'\0'*60]);source.write_bytes(raw)
+            self.assertEqual(prepare_capture(source),source);self.assertEqual(source.read_bytes(),raw)
+    def test_malformed_input_is_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'bad.pcapng';source.write_bytes(b'not-a-pcap')
+            self.assertEqual(prepare_capture(source),source)
+
+if __name__=='__main__':unittest.main()

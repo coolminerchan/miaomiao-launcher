@@ -23,12 +23,12 @@ https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
 
 Packet ID and protocol files
 proto_gen\cmdid.csv is from BanterSR/Lolo at 8b621917e8acca5b6e56fd43d04a355a8c11903d.
-proto_gen\msg_id.txt and the schema compiled into net_pb2.py are from byzp/of-ps at fa2142b8521e802beb23fc6ed538205b9f4f1513. Repository licenses are in proto_gen.
+proto_gen\msg_id.txt and the schema compiled into net_pb2.py are from byzp/of-ps at fa2142b8521e802beb23fc6ed538205b9f4f1513. Repository licenses are in proto_gen. Redirect.py is adapted from byzp/of-ps and is covered by the of-ps license stored in proto_gen\of-ps-LICENSE.txt.
 https://github.com/BanterSR/Lolo/tree/8b621917e8acca5b6e56fd43d04a355a8c11903d/protocol
 https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513
 
 Windows PktMon is supplied by Windows.
 https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon-syntax
 
-水音 (Shuiyin) capture tooling
-The public-server account capture workflow and part of the decode/export approach were developed with reference to capture tooling shared by 水音. Thanks for making it available to the community.
+Acknowledgements: thanks to 水音 for sharing account capture tooling and to the community authors of the 1.0.9 backup package.
+Launcher integration changes: ReadyPath/StopFlag handshake, explicit UTF-8 PktMon output and the separate capture checklist observer. Upstream hashes are kept in UPSTREAM-MANIFEST.sha256; integration notes are in INTEGRATION.json.

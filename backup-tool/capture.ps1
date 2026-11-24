@@ -125,6 +125,8 @@ $mutex = New-Object Threading.Mutex($false, 'Global\OverFieldBackupCapture')
 $ownsMutex = $false
 $started = $false
 $filtersAdded = $false
+$liveWorker = $null
+$liveStop = Join-Path $sessionPath 'live-progress-stop.flag'
 try {
     try { $ownsMutex = $mutex.WaitOne(0) }
     catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
@@ -150,6 +152,15 @@ try {
     }
 
     Write-Host "抓包已开始。输出目录 $sessionPath"
+    $observer = Join-Path (Split-Path $PSScriptRoot -Parent) 'capture_checklist.py'
+    if ($Mode -eq 'Account' -and $StopFlag -and (Test-Path -LiteralPath $observer)) {
+        $liveDir = Join-Path $sessionPath 'live-progress'
+        New-Item -ItemType Directory -Path $liveDir -Force | Out-Null
+        try {
+            $arguments = '-B -X utf8 "' + $observer + '" watch --capture-root "' + $sessionPath + '"'
+            $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
+        } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
+    }
     if ($Mode -eq 'Account') {
         Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
         Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
@@ -165,6 +176,10 @@ try {
     }
     else { [void](Read-Host '操作完毕后，回到本窗口按回车') }
 } finally {
+    if (Test-Path -LiteralPath $sessionPath) {
+        New-Item -ItemType File -Path $liveStop -Force | Out-Null
+        if ($liveWorker) { [void]$liveWorker.WaitForExit(2000); $liveWorker.Dispose() }
+    }
     try {
         if ($started) { Invoke-PacketMonitor @('stop') | Out-Null }
         if ($filtersAdded) { Remove-BackupFilters }

@@ -489,18 +489,24 @@ def import_backup(
                 )
                 friend_cnt += 1
 
-        # 10. 写入生活技能（默认预填 0..9 防越界，再用官服真实数据覆盖）
-        life_list = [net_pb2.LifeBaseInfo(life_type=i).SerializeToString() for i in range(10)]
+        # 10. 用服务端的生活类型字典存储等级和熟练度。
+        life_data = {
+            life_type: net_pb2.LifeBaseInfo(life_type=life_type, level=1).SerializeToString()
+            for life_type in net_pb2.LifeType.values()
+            if life_type != net_pb2.LifeType.LIFE_TYPE_NONE
+        }
         for lf in find_bins(raw_dir, "GetLifeInfoRsp"):
             lr = net_pb2.GetLifeInfoRsp()
             lr.ParseFromString(read_backup_member(lf))
-            if lr.HasField("life_base_info"):
-                lt = int(lr.life_base_info.life_type or lr.life_skill.life_type)
-                if 0 <= lt < len(life_list):
-                    life_list[lt] = lr.life_base_info.SerializeToString()
+            if not lr.HasField("life_base_info"):
+                continue
+            life_type = lr.life_base_info.life_type or lr.life_skill.life_type
+            if life_type > 0:
+                lr.life_base_info.life_type = life_type
+                life_data[life_type] = lr.life_base_info.SerializeToString()
         conn.execute(
             "INSERT OR REPLACE INTO life_info (player_id, life_blob) VALUES (?, ?)",
-            (player_id, pickle.dumps(life_list)),
+            (player_id, pickle.dumps(life_data)),
         )
 
         # 11. 写入抽卡记录

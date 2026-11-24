@@ -50,7 +50,7 @@ runtime/capture.log                 采集日志
 
 ## 依赖
 
-需要 `backup-tool/`（本分支已更新到 1.0.5）以及 TShark。免配置便携包自带 Python 运行时与 TShark；自行部署时设置 `OVERFIELD_TSHARK` 或把 TShark 放到 `backup-tool/tools/tshark/`。
+需要 `backup-tool/`（已更新到 1.0.9，含 Wi-Fi 帧兼容修复）以及 TShark。免配置便携包自带 Python 运行时与 TShark；自行部署时设置 `OVERFIELD_TSHARK` 或把 TShark 放到 `backup-tool/tools/tshark/`。
 
 检查环境：
 
@@ -59,6 +59,22 @@ python official_capture.py status
 ```
 
 返回 `ready: true` 表示可以采集；`problems` 会列出缺少的组件或权限。
+
+## 采集项目清单与 Wi-Fi 修复
+
+公服采集页显示 17 项清单：登录、主数据、角色外观、背包、武器、护甲、海报、宠物、家园家具、邮件、卡池、抽卡记录、成就、图鉴、探索、好友、档案/生活技能。每项显示响应数和未采集时的操作建议。
+
+- **已采集**：确实收到成功解码的相应公服响应，不把客户端请求或错误响应算成功。
+- **已收到（列表为空）**：服务器成功返回空列表，与“没有收到”不同。
+- **尚未采集**：当前可读取快照中尚未看到对应数据；可按建议打开界面触发。
+- **暂时无法判断**：ETL 仍在写入、系统暂不能读取快照等情况，不能据此认定数据缺失。
+- **未采集到**：结束采集后，按完整解码 JSON 核对仍缺少该项。
+
+前端每 2.5 秒读取最新清单。后台约每 5 秒尝试复制当前 ETL 并解析快照，**不会为了刷新清单停止或重启 PktMon**。快照无法读取时保留已确认项目并给出提示；部分 Windows/网卡组合可能只能在结束后得到完整核对。实时快照只放在本次私有采集目录，临时文件自动清理，原始抓包不会被覆盖。
+
+1.0.9 会识别误标为以太网的原生 Wi-Fi 帧，只在验证了明文 LLC 头后修正链路类型和残留加密标记。修正文件另存为 `capture.wifi-fixed.pcapng`，原始 `capture.etl` 和 `capture.pcapng` 保留。旧 PCAP 也可用新工具重新解析，无须重抓。
+
+上游 `MANIFEST.sha256` 的原始来源记录保留为 `UPSTREAM-MANIFEST.sha256`，启动器的 ReadyPath/StopFlag、UTF-8 和实时观察器适配见 `INTEGRATION.json`；上游文件清单不代表适配后的脚本仍逐字相同。
 
 ## 已知限制
 

@@ -2,36 +2,90 @@
 
 适合想保存自己官服角色进度、背包、染色或家园的玩家。每个人在自己的电脑上用自己的账号跑一遍，结果保存在本机。Windows 10/11 x64，使用原有的国服 PC 客户端。工具已带便携 Python、TShark 与解析依赖，抓包用 Windows 自带的 PktMon。
 
+当前版本：1.0.9 portable（Windows x64）。更新内容见 RELEASE-NOTES.txt。
+备份和解析可直接使用内置工具；导入 of-ps 和本机转发的额外依赖见第四、五节。
+
 一、备份自己的账号
 
 1. 在资源管理器「全部解压」到你能写入的目录，例如 D:\Games\OverField-Backup。先关闭本地私服代理或转发工具，让客户端照常连接官服。
 2. 右键 1_backup_account.cmd，选择「以管理员身份运行」。看到「抓包已开始」后，退出并重新打开客户端，登录自己的官服账号，等角色进入场景。
 3. 想保存哪些数据，就点开哪些界面并等内容加载。建议先看角色、穿搭及染色预设、背包、武器和装备、任务、宠物、个人资料、好友、邮件、抽卡历史、成就与图鉴。抽卡历史和邮件有多页时，打开你想留存的页和详细内容。
 4. 进自己的家园等家具加载。若要留存多套布局，分别切到对应预设并进入家园。需要逐套独立归档时，每套单独运行并给输出目录备注。
-5. 回到备份窗口按回车。到 output\account_日期时间\export\summary.json 核对。player_highlights 应有你的 UID 和角色数量，message_counts 应出现你关心的响应。宠物看 GetPetRsp，家园实际布局看 SceneDataNotice。缺哪项就重新抓一次，打开对应界面。
+5. 回到备份窗口按回车。到 output\account_日期时间\export 查看 account_玩家名_UID.zip，内含账号数据、自己的家园场景和 summary.json。拜访过的其他家园在 export\gardens 按屋主另存为 garden_玩家名_UID.zip。没有取得唯一账号 UID 时，工具会保留解包结果，等你按账号分别重抓。player_uids 保存原官服 UID，单账号备份应只有你自己的 UID。如果列出多个 UID，请每个账号单独重抓。player_highlights 可核对角色数量，message_counts 应出现你关心的响应。宠物看 GetPetRsp，家园实际布局看 SceneDataNotice。缺哪项就重新抓一次，打开对应界面。
 
 二、只备份拜访过的家园
 
 1. 右键 2_backup_gardens.cmd，以管理员身份运行。已经登录官服的话可以直接拜访。
 2. 依次进入想保存的好友家园，每家等家具显示出来再离开。按回车结束。
-3. 在 output\gardens_日期时间\export 内查看 gardens_index.json，以及按 UID 保存的 .bin 和 .json。每位屋主保留家具数量最多的一份，数量一样时取抓包中较晚的一份。昵称无法从场景取得时按 UID 核对。
+3. 在 output\gardens_日期时间\export 内查看 gardens_index.json。每位屋主都有单独的 garden_玩家名_UID.zip，内含布局的 .bin 和 .json。每位屋主保留家具数量最多的一份，数量一样时取抓包中较晚的一份。未抓到昵称时文件名会显示「未知玩家」，可用 UID 确认。
 
 三、保存和重新解析
 
-建议把自己的 output 额外复制到安全的硬盘目录。每次备份各有一个目录，内含 capture.etl、capture.pcapng 和 export。export\json 可查看，export\raw 是账号数据的 Protobuf 二进制。抓包文件可能包含登录令牌、UID、地址和好友资料，请只保留在可信的位置。转发给朋友的是原始工具包 ZIP。导出跳过已知登录请求，并移除登录响应里的日志令牌，导出的玩家数据仍属于个人资料。
+建议把自己的 output 额外复制到安全的硬盘目录。每次备份各有一个目录，内含 capture.etl、capture.pcapng 和 export。export\json 可查看，export\raw 是账号数据的 Protobuf 二进制。原始抓包保留在备份目录，位于账号 ZIP 之外。抓包文件可能包含登录令牌、UID、地址和好友资料，请只保留在可信的位置。分享工具给朋友时发送工具包 ZIP。自己的账号 ZIP 按第五节交给服主。导出跳过已知登录请求，并移除登录响应里的日志令牌，导出的玩家数据仍属于个人资料。
 
 有旧 .pcapng 时可直接拖到 3_decode_pcap.cmd，输出会写在抓包旁边。重解包家园时，在工具包目录打开 PowerShell，运行下面的命令。
 
   .\tools\python\python.exe -B -X utf8 .\extract_gardens.py "D:\你的备份\capture.pcapng"
 
-四、核对和排查
+四、导入 of-ps 并启动游戏
 
-- 已连官服且重新登录，summary.json 仍没有 UID 时，检查当时是否确实进到场景，是否开着本地服代理，以及工具是否收到游戏端口流量。默认抓取 TCP 11001–11004、21001、21002，来自现有国服 PC 记录与脚本配置。客户端或区服改端口时，需要按实际情况调整。
+1. 在运行 of-ps 的电脑上解压本工具包。导入窗口使用 of-ps 的 Python 环境和服务端依赖。如果平时用虚拟环境启动 of-ps，请先激活同一个环境，再在工具包目录运行 .\4_import_player.cmd。首次配置 Python、服务端依赖或本机转发时，参照 of-ps 自带的 README_zh.md。
+2. 双击 4_import_player.cmd，也可以将 account_玩家名_UID.zip 拖到它上面。按提示选择含 main.py 和 config.py 的 of-ps 目录。如果工具包旁边已有名为 of-ps 的目录，工具会直接使用它。核对窗口显示的数据库路径。
+3. 选择账号备份 ZIP，核对昵称和原 UID，设置 of-ps 的登录名和密码，然后点击「导入并创建账号」。一份 ZIP 对应一位玩家，重复的 UID 或登录名会提示冲突。好友家园包 garden_玩家名_UID.zip 是家园布局归档，账号导入使用 account_玩家名_UID.zip。
+4. 若窗口提示目标数据库尚未初始化，先在所选 of-ps 目录运行一次 python main.py，等服务端启动后正常关闭，再导入。服务端使用内存数据库时，也要先停服再导入。
+5. 导入成功后，在 of-ps 目录开一个终端运行下面的命令，并保持窗口运行。of-ps 是独立服务端，导入和打开客户端启动器都不会启动服务端。
+
+   python main.py
+
+6. 客户端和服务端都在同一台电脑时，在备份工具目录开另一个 PowerShell 运行下面的命令。把示例路径换成自己的 launcher.exe。首次配置证书见第五节。
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_proxy.ps1 -LauncherPath "D:\Games\OverField\launcher.exe"
+
+7. 服务端和客户端转发就绪后，启动游戏目录下的 client\launcher.exe，使用刚才设置的登录名和密码。多人一起玩时，可以将各玩家的 ZIP 导入同一个 of-ps，玩家客户端连接同一台服务端。同机配置里的 127.0.0.1 只适用于在服务端这台电脑上玩的客户端。
+
+五、玩家备份后如何加入 of-ps
+
+加入朋友开的服
+
+1. 完成备份后，把 export 里的 account_玩家名_UID.zip 私下发给服主。原始 .etl 和 .pcapng 留在自己电脑，也无需提供官服密码。
+2. 等服主导入后，确认你的原 UID、of-ps 登录名和密码，以及服务器地址、HTTP 端口和可用的国服 PC 客户端版本。先连上服主指定的局域网或私人组网。所有玩家共用服主开的 of-ps。
+3. 在自己的电脑上打开备份工具包里的 Redirect.py。文件开头的 ip 填服主给的服务器地址，port 填 HTTP 端口（默认 21000）。如果服主已经配好了这个文件，可以直接使用。请在电脑上安装 mitmproxy，确保 PowerShell 能运行 mitmdump。
+4. 在备份工具目录打开 PowerShell，运行下面的命令并保持窗口开启。把示例路径换成你自己的游戏安装目录或 launcher.exe。B 服目录里可能有外层 OverField.exe，脚本会从该目录识别 OverField Game\launcher.exe。转发按游戏及其受支持的登录组件的完整路径筛选进程，默认只显示警告和错误。如果之前用旧命令启动过全局转发，先在旧窗口按 Ctrl+C。
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_proxy.ps1 -LauncherPath "D:\Games\OverField\launcher.exe"
+
+   第一次使用本机转发时，启动脚本后，按 mitmproxy 的证书说明安装当前电脑生成的 Windows 证书（默认在 %USERPROFILE%\.mitmproxy\mitmproxy-ca-cert.p12）。
+
+5. 打开国服 PC 游戏目录里的 launcher.exe，如果客户端原先已开启，先退出再重新打开，然后使用第 2 步的 of-ps 账号登录，进游戏后核对昵称和 UID。玩完先退出游戏，再在本机转发窗口按 Ctrl+C。要回官服玩或重新抓包时，请先结束本机转发。
+
+B 站渠道的账号先用原 B 服客户端正常登录并备份，备份前结束本机转发。加入 of-ps 时使用服主设置的 of-ps 账号和经服主验证的 PC 客户端版本。B 服安装路径可识别，B 站渠道登录流程仍需单独验证。
+
+给服主
+
+1. 按第四节把每位玩家的账号 ZIP 逐个导入同一个 of-ps，核对 UID 后把对应的登录名和密码交给玩家。
+2. 多人从不同电脑连接时，把服务端 config.py 的 GAME_SERVER_GADGET_IP 配成所有玩家都能访问的服务端地址，GAME_SERVER_GADGET_PORT 填玩家能访问的游戏端口，通常与 GAME_SERVER_PORT 一致。确保玩家所在网络能访问服务端的 HTTP 端口（默认 TCP 21000）和游戏端口（默认 TCP 11033）。改好后启动或重启 of-ps，再把地址、HTTP 端口和对应的 Redirect.py 发给玩家。
+3. 玩家能登录但进不了场景时，先核对 GAME_SERVER_GADGET_IP 和游戏端口；如果玩家看到的仍是官服入口，先确认玩家自己电脑上的转发窗口正在运行并指向正确的服务端。
+
+自己开服玩
+
+按第四节在自己的电脑上导入、启动 of-ps 和本机转发，再打开 launcher.exe。同机使用 127.0.0.1。
+
+of-ps 中文说明
+https://github.com/byzp/of-ps/blob/fa2142b8521e802beb23fc6ed538205b9f4f1513/README_zh.md
+mitmproxy 本机证书说明
+https://docs.mitmproxy.org/stable/concepts/certificates/
+
+六、核对和排查
+
+- Wi-Fi 抓包文件有内容但解析为 0 条 TCP 流时，可能是 PktMon 把原生 Wi-Fi 帧标成以太网，并保留了驱动解密前的加密标记。解析器现会核对帧格式，自动生成 capture.wifi-fixed.pcapng 修正副本后解析，原始 .etl 和 .pcapng 保留。以前抓到的文件可拖到 3_decode_pcap.cmd 重新恢复，无需先重新抓包。
+- 已连官服且重新登录，summary.json 的 player_uids 仍为空时，检查当时是否确实进到场景，是否开着本地服代理，以及工具是否收到游戏端口流量。默认抓取 TCP 11001–11004、21001、21002，来自现有国服 PC 记录与脚本配置。客户端或区服改端口时，需要按实际情况调整。
 - 只出现部分数据时，针对缺项再做一次完整登录与界面加载。客户端收到过的数据才会出现在备份里。
 - 出现未知消息 ID 时请保留原始抓包，后续可换更新的协议重新解析。本包用工作区已经验证过的协议定义。
 - 如果 TShark 无法启动或 Windows 提示缺少 MSVCP140.dll / VCRUNTIME140.dll，运行 tools\vc_redist.x64.exe 安装 Microsoft Visual C++ x64 运行库，再重试。
-- 工具提示 PktMon 已经运行或已有筛选器时，先到原来的诊断或备份窗口正常结束该会话，再重新运行本工具。
-- 这份工具包用于备份归档。将归档导进 of-ps 是后续独立步骤，依赖目标服务端的存档结构。
+- 备份结束时请回到窗口按回车，让工具完成导出。如果上次直接关闭了窗口，下一次启动会清理可识别的本工具残留会话和筛选器，保留旧 capture.etl。只想清理时，可在工具包目录用管理员 PowerShell 执行下面的命令。其他诊断会话请在原诊断窗口结束。
 
-工具版本、上游链接和许可证位置见 THIRD-PARTY.txt。
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\capture.ps1 -CleanupOnly
+
+
+本工具版本见 VERSION，更新内容见 RELEASE-NOTES.txt，第三方组件版本、上游链接和许可证位置见 THIRD-PARTY.txt。
 

@@ -14,8 +14,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.4.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.4")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.5.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.5")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 
@@ -426,7 +426,10 @@ namespace OverFieldLocal
         readonly Label captureHint = new Label();
         readonly TextBox officialLauncherPath = new TextBox();
         readonly ActionButton officialBrowse = new ActionButton("选择启动器");
-        bool captureRunning;
+        bool captureRunning, checkingCaptureProgress;
+        readonly ListView captureChecklist = new ListView();
+        readonly Label captureProgressHint = new Label();
+        readonly System.Windows.Forms.Timer captureProgressTimer = new System.Windows.Forms.Timer();
         readonly ActionButton soloMode = new ActionButton("单机模式"), hostMode = new ActionButton("局域网服务"), captureMode = new ActionButton("公服采集"), importData = new ActionButton("导入数据"), backupData = new ActionButton("备份存档"), openData = new ActionButton("数据目录"), firewall = new ActionButton("局域网权限"), roomsButton=new ActionButton("房间与玩家");
         readonly NumericUpDown uidBox = new NumericUpDown();
         readonly ComboBox hostBox = new ComboBox();
@@ -464,7 +467,7 @@ namespace OverFieldLocal
             ApplyMode();
             ShowCapturePage(false);
             soloMode.Click += async delegate { await SwitchMode("solo"); };
-            captureMode.Click += async delegate { ShowCapturePage(true); if(!uiPreview) await RefreshCaptureState(); };
+            captureMode.Click += async delegate { ShowCapturePage(true); if(!uiPreview) { await RefreshCaptureState(); await RefreshCaptureProgress(); } };
             officialBrowse.Click += async delegate { await ChooseOfficialLauncher(); };
             captureStop.Enabled = false;
             captureSaveZip.Enabled = false;
@@ -503,6 +506,7 @@ namespace OverFieldLocal
                 {
                     var captured = await Task.Run(() => backend.Official("stop"));
                     captureRunning = false;
+                    await RefreshCaptureProgress();
                     string zip = captured.ContainsKey("accountZip") ? Convert.ToString(captured["accountZip"]) : "";
                     if (String.IsNullOrWhiteSpace(zip) || !System.IO.File.Exists(zip))
                     {
@@ -568,6 +572,8 @@ namespace OverFieldLocal
             browse.Click += BrowseRoot;
             roomsButton.Click += delegate { using(var dialog=new RoomManagerForm(backend)) dialog.ShowDialog(this); };
             timer.Interval = 5000; timer.Tick += async delegate { await RefreshStatus(); };
+            captureProgressTimer.Interval=2500;
+            captureProgressTimer.Tick+=async delegate { if(capturePage.Visible && !uiPreview) await RefreshCaptureProgress(); };
             Shown += async delegate
             {
                 if(uiPreview) {
@@ -580,7 +586,7 @@ namespace OverFieldLocal
                     await Task.Delay(150); SaveUIPreview(uiPreviewDir); Close(); return;
                 }
                 Append("启动器已就绪，正在读取本地服务状态。");
-                await RefreshStatus(); if (closing) return; timer.Start();
+                await RefreshStatus(); if (closing) return; timer.Start(); captureProgressTimer.Start();
                 if (verify) await Verify();
                 if (Array.IndexOf(args,"--rooms-smoke")>=0)
                 {
@@ -595,6 +601,7 @@ namespace OverFieldLocal
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
                 closing = true; timer.Stop(); timer.Dispose();
+                captureProgressTimer.Stop(); captureProgressTimer.Dispose();
                 backend.CancelAll();
             };
         }
@@ -676,6 +683,35 @@ namespace OverFieldLocal
             logs.Dock = DockStyle.Fill; logs.ReadOnly = true; logs.BackColor = Theme.Panel; logs.ForeColor = Theme.Muted; logs.BorderStyle = BorderStyle.None; logs.Font = Theme.Font(9); logs.DetectUrls = false; logs.ScrollBars = RichTextBoxScrollBars.Vertical;
             logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 6);
             footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 7);
+        }
+        async Task RefreshCaptureProgress()
+        {
+            if(checkingCaptureProgress || closing || uiPreview) return;
+            checkingCaptureProgress=true;
+            try {
+                var data=await Task.Run(() => backend.Official("progress"));
+                if(closing) return;
+                RenderCaptureProgress(data);
+            } catch(Exception error) { if(!closing) captureProgressHint.Text="项目状态暂不可读："+error.Message; }
+            finally { checkingCaptureProgress=false; }
+        }
+        void RenderCaptureProgress(Dictionary<string,object> data)
+        {
+            captureChecklist.BeginUpdate();
+            try {
+                captureChecklist.Items.Clear();
+                if(data.ContainsKey("items")) foreach(object item in (System.Collections.IEnumerable)data["items"]) {
+                    var row=item as Dictionary<string,object>;if(row==null) continue;
+                    string status=Convert.ToString(row["state"]);
+                    var view=new ListViewItem(Convert.ToString(row["label"]));
+                    view.SubItems.Add(Convert.ToString(row["status"]));view.SubItems.Add(Convert.ToString(row["count"]));view.SubItems.Add(Convert.ToString(row["hint"]));
+                    view.ForeColor=status=="collected"?Color.FromArgb(36,128,100):status=="missing"?Color.FromArgb(168,99,38):Theme.Muted;
+                    captureChecklist.Items.Add(view);
+                }
+                string warning=data.ContainsKey("warning")?Convert.ToString(data["warning"]):"";
+                string stamp=data.ContainsKey("updatedAt")?Convert.ToString(data["updatedAt"]):"";
+                captureProgressHint.Text=String.IsNullOrWhiteSpace(warning)?"最近核对："+stamp+" · 只按成功解码的响应确认，空列表不代表没有收到。":warning;
+            } finally { captureChecklist.EndUpdate(); }
         }
         async Task<bool> SaveCaptureZip(string zip)
         {

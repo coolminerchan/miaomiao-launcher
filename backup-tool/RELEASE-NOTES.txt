@@ -1,0 +1,34 @@
+开放空间玩家数据备份工具 1.0.9 portable
+适用平台：Windows 10/11 x64
+
+本版修复
+
+- 修复部分 Wi-Fi 网卡的 PktMon 抓包有内容但解析为 0 条 TCP 流的问题。
+  自动核对每个接口的帧格式，将误标为以太网的原生 Wi-Fi 帧写入修正副本。
+  对已验证明文 LLC 头的数据帧，同时清除驱动解密后残留的加密标记。
+- 原始 capture.etl 和 capture.pcapng 保留，修正文件另存为
+  capture.wifi-fixed.pcapng。账号解析和家园提取均使用这项兼容处理。
+- 以前受影响的 .pcapng 可拖到 3_decode_pcap.cmd 重新解析，无需重新抓包。
+
+便携包使用
+
+1. 完整解压 ZIP，进入 OverField-Backup 目录。
+2. 右键 1_backup_account.cmd，选择「以管理员身份运行」。
+3. 看到「抓包已开始」后退出并重新打开游戏，登录官服并进入场景。
+4. 打开需要备份的界面，完成后回备份窗口按回车，等待导出。
+
+备份和重新解析已带 Python、TShark、Protobuf、Cramjam，无需另装 Python
+或 Npcap。若缺少 Visual C++ 运行库，可运行 tools\vc_redist.x64.exe。
+新备份写入 output 目录。便携包不包含玩家数据、抓包或登录凭据。
+
+导入和转发的额外依赖
+
+4_import_player.cmd 使用 of-ps 的 Python 环境及服务端依赖；本机转发需要
+另装 mitmproxy 并配置证书。这些功能不属于免配置的备份流程。
+B 服安装路径识别沿用现有实现，B 站渠道登录转发流程仍需单独验证。
+
+版本验证
+
+随包 VERSION 为 1.0.9，MANIFEST.sha256 记录各发布文件的 SHA-256。
+ZIP 旁的 .sha256 文件可用于验证下载后的压缩包。
+完整操作和第三方许可证见 使用说明.txt、THIRD-PARTY.txt。

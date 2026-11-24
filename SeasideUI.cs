@@ -135,8 +135,8 @@ namespace OverFieldLocal
             var dataActions=Grid(4,1);for(int i=0;i<4;i++)dataActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=0;foreach(var b in new[]{importData,backupData,openData,firewall}){SpaceButton(b,index==3);dataActions.Controls.Add(b,index++,0);}dataRows.Controls.Add(dataActions,0,1);layout.Controls.Add(dataPanel,0,5);
 
             capturePage=new Surface{Dock=DockStyle.Fill,Padding=new Padding(24,18,24,20),Margin=Padding.Empty,Visible=false};
-            var captureRows=Grid(1,7);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int h in new[]{34,28,58,66,10,186,126})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePage.Controls.Add(captureRows);
+            var captureRows=Grid(1,9);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            foreach(int h in new[]{34,28,58,54,68,28,274,42,92})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePage.Controls.Add(captureRows);
             captureRows.Controls.Add(FitLabel("公服账号采集",11,Theme.Text,FontStyle.Bold),0,0);
             captureRows.Controls.Add(FitLabel("公服启动器路径（仅公服，与私服目录独立）",9.5f,Theme.Muted),0,1);
             var officialRow=Grid(2,1);officialRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));officialRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,146));
@@ -146,14 +146,25 @@ namespace OverFieldLocal
             captureHint.Dock=DockStyle.Fill;captureHint.AutoSize=false;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(9);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.TopLeft;captureHint.Margin=Padding.Empty;
             captureHint.Text="抓包就绪后会打开公服。结束采集将生成账号 ZIP，并让你选择保存位置；入库是可选操作，取消或冲突不影响已交付的 ZIP。";
             captureRows.Controls.Add(captureHint,0,3);
-            var captureActions=Grid(1,3);for(int i=0;i<3;i++)captureActions.RowStyles.Add(new RowStyle(SizeType.Percent,100f/3));
-            SpaceButton(captureStart);SpaceButton(captureStop,true);SpaceButton(captureSaveZip,true);
-            
-            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,0,1);captureActions.Controls.Add(captureSaveZip,0,2);
-            captureRows.Controls.Add(captureActions,0,5);
+            var captureActions=Grid(3,1);for(int i=0;i<3;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100f/3));
+            SpaceButton(captureStart);SpaceButton(captureStop);SpaceButton(captureSaveZip,true);
+            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,1,0);captureActions.Controls.Add(captureSaveZip,2,0);
+            captureRows.Controls.Add(captureActions,0,4);
+            captureRows.Controls.Add(FitLabel("采集项目清单 · 工具 1.0.9 · 实时核对 / 结束后最终核对",9.5f,Theme.Text,FontStyle.Bold),0,5);
+            captureChecklist.Dock=DockStyle.Fill;captureChecklist.View=View.Details;captureChecklist.FullRowSelect=true;captureChecklist.MultiSelect=false;captureChecklist.HideSelection=false;
+            captureChecklist.Font=Theme.Font(9);captureChecklist.BackColor=Theme.Panel;captureChecklist.ForeColor=Theme.Text;captureChecklist.BorderStyle=BorderStyle.FixedSingle;captureChecklist.Margin=new Padding(0,4,0,4);
+            captureChecklist.Columns.Add("项目",210);captureChecklist.Columns.Add("状态",150);captureChecklist.Columns.Add("响应",60);captureChecklist.Columns.Add("未采集时的操作建议",250);
+            foreach(string label in new[]{"登录基础信息","UID、等级与任务主数据","角色与外观","背包物品","武器","护甲","装备海报","宠物列表","家园与家具","邮件列表","卡池信息","抽卡记录","成就","图鉴","探索与收集","好友列表","档案与生活技能"}){
+                var row=new ListViewItem(label);row.SubItems.Add("等待核对");row.SubItems.Add("0");row.SubItems.Add("");captureChecklist.Items.Add(row);
+            }
+            captureChecklist.Resize+=delegate { if(captureChecklist.Columns.Count==4) captureChecklist.Columns[3].Width=Math.Max(190,captureChecklist.ClientSize.Width-440); };
+            captureRows.Controls.Add(captureChecklist,0,6);
+            captureProgressHint.Dock=DockStyle.Fill;captureProgressHint.AutoSize=false;captureProgressHint.AutoEllipsis=true;captureProgressHint.Font=Theme.Font(8.5f);captureProgressHint.ForeColor=Theme.Muted;captureProgressHint.Margin=new Padding(0,4,0,0);
+            captureProgressHint.Text="只有成功解码的公服响应才算已采集；快照暂不可读会显示暂时无法判断，结束后按完整数据核对。";
+            captureRows.Controls.Add(captureProgressHint,0,7);
             captureSteps.Dock=DockStyle.Fill;captureSteps.AutoSize=false;captureSteps.Font=Theme.Font(9);captureSteps.ForeColor=Theme.Muted;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.Margin=Padding.Empty;
-            captureSteps.Text="1. 单独选择公服启动器路径，不要选择 profiles 中的私服副本\n2. 点「开始采集」，抓包就绪后会自动打开公服，正常登录并进入场景\n3. 依次打开角色、背包、装备、宠物、邮件、家园等界面，等加载完成\n4. 点「结束采集」，选择账号 ZIP 保存位置；入库可取消\n5. 可点「保存账号 ZIP」重新另存，只私下分享给可信的人";
-            captureRows.Controls.Add(captureSteps,0,6);
+            captureSteps.Text="1. 管理员运行，选择公服原版 EXE；不要选择私服副本\n2. 开始采集并登录，按清单打开缺少的界面并等待加载\n3. 结束后核对完整清单并另存 ZIP；入库可取消，私人数据勿公开";
+            captureRows.Controls.Add(captureSteps,0,8);
             scroll.Controls.Add(capturePage);
 
             var logPanel=new Surface{Dock=DockStyle.Fill,Margin=Padding.Empty,Padding=new Padding(20,12,20,14)};

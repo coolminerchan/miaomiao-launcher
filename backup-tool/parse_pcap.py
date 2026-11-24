@@ -37,8 +37,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROTO_DIR = SCRIPT_DIR / "proto_gen"
 TSHARK = str(SCRIPT_DIR / "tools" / "tshark" / "tshark.exe")
 sys.path.insert(0, str(PROTO_DIR))
+sys.path.insert(0, str(SCRIPT_DIR))
 
 import net_pb2  # type: ignore  # noqa: E402
+from pcap_compat import prepare_capture  # noqa: E402
 
 HEADER_STRUCT = struct.Struct(">H")
 GAME_PORTS = {"11001", "11002", "11003", "11004", "21001", "21002"}
@@ -309,6 +311,7 @@ def write_garden_backups(
 
 
 def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
+    pcap_path = prepare_capture(pcap_path)
     cmd_map = load_cmd_map()
     raw_dir = out_dir / "raw"
     json_dir = out_dir / "json"

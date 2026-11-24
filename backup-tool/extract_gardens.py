@@ -20,6 +20,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SCRIPT_DIR / "proto_gen"))
 
 import net_pb2  # type: ignore  # noqa: E402
+from pcap_compat import prepare_capture  # noqa: E402
 from parse_pcap import (  # type: ignore  # noqa: E402
     SCENE_DATA_NOTICE_ID,
     collect_garden_scene,
@@ -31,6 +32,7 @@ from parse_pcap import (  # type: ignore  # noqa: E402
 
 
 def extract_gardens(pcap_path: Path, out_dir: Path) -> None:
+    pcap_path = prepare_capture(pcap_path)
     known_names: dict[int, str] = {}
     layouts: dict[int, net_pb2.SceneGardenData] = {}
     streams = list_tcp_streams(pcap_path)
