@@ -97,8 +97,8 @@ namespace OverFieldLocal
             var scroll=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Margin=Padding.Empty,BackColor=Theme.Bg};shell.Controls.Add(scroll,1,0);
             var layout=Grid(1,8);layout.Dock=DockStyle.Top;layout.Padding=new Padding(26,24,26,22);layout.Height=970;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int height in new[]{160,96,80,162,128,118,146,34})layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
-            scroll.Controls.Add(layout);scroll.Resize+=delegate{layout.Height=Math.Max(970,scroll.ClientSize.Height);};
+            foreach(int height in new[]{132,88,84,150,112,124,132,34})layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+            scroll.Controls.Add(layout);scroll.Resize+=delegate{layout.Height=Math.Max(886,scroll.ClientSize.Height);};
 
             var hero=new SeasideHero{Dock=DockStyle.Fill,Margin=new Padding(0,0,0,18),Padding=new Padding(24,14,24,16)};
             var heroGrid=Grid(2,3);heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,64));heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,36));
@@ -129,7 +129,7 @@ namespace OverFieldLocal
             var dataPanel=new Surface{Dock=DockStyle.Fill,Padding=new Padding(20,12,20,14),Margin=new Padding(0,0,0,18)};
             var dataRows=Grid(1,2);dataRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));dataRows.RowStyles.Add(new RowStyle(SizeType.Absolute,28));dataRows.RowStyles.Add(new RowStyle(SizeType.Percent,100));dataPanel.Controls.Add(dataRows);
             profileLabel.Dock=DockStyle.Fill;profileLabel.AutoEllipsis=true;profileLabel.Font=Theme.Font(9);profileLabel.ForeColor=Theme.Muted;profileLabel.TextAlign=ContentAlignment.MiddleLeft;profileLabel.Margin=Padding.Empty;dataRows.Controls.Add(profileLabel,0,0);
-            var dataActions=Grid(4,1);for(int i=0;i<4;i++)dataActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=0;foreach(var b in new[]{importData,backupData,openData,firewall}){SpaceButton(b,index==3);dataActions.Controls.Add(b,index++,0);}dataRows.Controls.Add(dataActions,0,1);layout.Controls.Add(dataPanel,0,4);
+            var dataActions=Grid(4,1);for(int i=0;i<4;i++)dataActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=0;foreach(var b in new[]{importData,backupData,openData,firewall}){SpaceButton(b,index==3);dataActions.Controls.Add(b,index++,0);}dataRows.Controls.Add(dataActions,0,1);layout.Controls.Add(dataPanel,0,5);
 
             var capturePanel=new Surface{Dock=DockStyle.Fill,Padding=new Padding(20,12,20,14),Margin=new Padding(0,0,0,18)};
             var captureRows=Grid(1,3);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
@@ -141,7 +141,7 @@ namespace OverFieldLocal
             var captureActions=Grid(2,1);for(int i=0;i<2;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             SpaceButton(captureStart);SpaceButton(captureStop,true);
             captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,1,0);
-            captureRows.Controls.Add(captureActions,0,2);layout.Controls.Add(capturePanel,0,5);
+            captureRows.Controls.Add(captureActions,0,2);layout.Controls.Add(capturePanel,0,4);
 
             var logPanel=new Surface{Dock=DockStyle.Fill,Margin=Padding.Empty,Padding=new Padding(20,12,20,14)};
             var logRows=Grid(1,2);logRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));logRows.RowStyles.Add(new RowStyle(SizeType.Absolute,30));logRows.RowStyles.Add(new RowStyle(SizeType.Percent,100));logPanel.Controls.Add(logRows);
