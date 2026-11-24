@@ -242,6 +242,14 @@ def build_player(main, entries, report=None):
                     else: skipped += 1
                 data['dyeSchemes'] = schemes
                 items['itemFashionMap'][str(data['outfit_id'])] = model('ItemFashionInfo', data)
+                # Fashion entries often carry no base_item block, yet the wardrobe
+                # lists only what exists in itemBaseInfo. Register the owned outfit
+                # there too, otherwise the fashion map is present but unreachable.
+                base_id = str(as_int(item.get('item_id'), as_int(data['outfit_id'])))
+                if base_id not in items['itemBaseInfo']:
+                    items['itemBaseInfo'][base_id] = model('ItemBaseInfo', {
+                        'item_id': as_int(base_id), 'num': 1,
+                        'item_type': as_int(item.get('item_tag')), 'pack_type': as_int(detail.get('pack_type'))})
     greatest = 0
     for packet_kind, collection, target, kind, id_key, tag in [
         ('GetWeaponRsp','weapons','itemWeaponMap','ItemWeaponInfo','weapon_id','EBagItemTag_Weapon'),
