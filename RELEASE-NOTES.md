@@ -2,6 +2,14 @@
 
 清爽的天空蓝与海洋青动漫风界面，提供单机/局域网服务管理、本地 UID 登录、独立存档、账号数据导入与备份，以及房间和玩家管理。按钮加大、间距更宽，小窗口使用滚动布局，避免文字相互挤压。
 
+## v1.1.5 更新
+
+- **支持 Steam 版公服客户端**：可直接选择 Steam 游戏快捷方式（`.url`）。这类客户端不固定游戏端口，改为按服务器地址采集。
+- **修复 VPN / 隧道网卡抓包为空**：隧道网卡的裸 IP 包被误标为以太网，导致解包得到 0 条 TCP 流。现已自动识别并修正，原始抓包保留不变。
+- **采集过程可见进度**：改为分段轮转，每段停止即落盘，采集中就能看到逐项结果。
+- **退出即清理**：管理员模式下关闭启动器不再残留服务进程占用端口；游戏在运行时不会误停。
+- 备份工具同步更新至 **1.0.9**。
+
 ## 致谢
 
 感谢各位大佬对服务端部分功能的实现，以及对账号数据采集、备份和解析工具的开发与分享！感谢 [BanterSR/Lolo](https://github.com/BanterSR/Lolo)、[byzp/of-ps](https://github.com/byzp/of-ps) 及相关社区贡献者。具体来源和许可证见仓库的第三方组件声明。
@@ -13,27 +21,28 @@
 ## 下载选择
 
 - 源码包：包含启动器、备份工具源码、构建脚本和使用说明。
-- 启动器组件包：包含 EXE、SDK、图标、核心脚本和文档；需自行提供 Python 3.12、合法来源的服务程序/资源，单机模式还需兼容的本地 PC 客户端。不是完整游戏客户端或解压即玩的私服包。
+- 启动器便携版：含 EXE、SDK、便携 Python、TShark 与解码依赖，解压即可运行；单机模式仍需兼容版本的本地 PC 客户端。
+- 启动器组件包：仅 EXE、SDK、图标、核心脚本和文档；需自行提供 Python 3.12、合法来源的服务程序/资源。
 - Windows 玩家备份工具：独立完整附件，含便携 Python、TShark 与解码依赖，用于本人账号备份；不能凭 UID 自动获取官服数据。
 
 ## 下载启动器
 
 在本页底部 **Assets** 区域点击下载（国内网络打不开 GitHub 时，可让朋友下载后传给你）：
 
-- **OverFieldLauncher-components.zip** —— 启动器本体，先下这个
-- [直接下载启动器组件包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverFieldLauncher-components.zip)
-- [直接下载完整源码](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverFieldLauncher-source.zip)
-- [直接下载 Windows 玩家备份工具](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.0.0/OverField-Backup-Windows.zip)
+- **OverFieldLauncher-portable.zip** —— 便携版，解压即用（推荐）
+- **OverFieldLauncher-components.zip** —— 仅启动器本体，需自备运行环境
+- [直接下载便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.1.5/OverFieldLauncher-portable.zip)
+- [直接下载完整源码](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.1.5/OverFieldLauncher-source.zip)
+- [直接下载 Windows 玩家备份工具](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.1.5/OverField-Backup-Windows.zip)
 
 **使用步骤**
 
-1. 完整解压组件包到可写目录，例如 `D:\Games\OverFieldLauncher`，不要在压缩包里直接双击运行。
-2. 安装 Python 3.12 x64，安装时勾选“Add python.exe to PATH”。
-3. 准备服务资源：从合法来源取得 `Lolo.exe`、`config.json`、`data\`、`Resource\` 与数据库架构，放进启动器目录下的 `server-kit\` 文件夹。
-4. 双击 `OverFieldLauncher.exe`。单机模式先点“更改目录”选中本地 PC 客户端；局域网模式选择本机局域网地址后发布。
-5. 首次启动前可执行 `python preflight.py --mode host` 检查缺项，退出码 0 表示文件与数据库架构齐全。
+1. 完整解压到可写目录，例如 `D:\Games\OverFieldLauncher`，不要在压缩包里直接双击运行。
+2. 双击 `OverFieldLauncher.exe`。单机模式先点“更改目录”选中本地 PC 客户端；局域网模式选择本机局域网地址后发布。
+3. 便携版自带 Python、服务程序与资源，可直接使用；组件包需自行安装 Python 3.12 x64（勾选“Add python.exe to PATH”）并把 `Lolo.exe`、`config.json`、`data\`、`Resource\` 放进 `server-kit\`。
+4. 可执行 `python preflight.py --mode host` 检查缺项，退出码 0 表示文件与数据库架构齐全。
 
-组件包不含 Python、服务程序、游戏资源与游戏客户端，**不是解压即玩的完整私服包**；单机模式需要兼容版本的本地客户端（现有适配为 1.1.12）。
+便携版已包含 Python、服务程序与游戏资源，但仍需自备兼容版本的本地游戏客户端；组件包不含这些，**不是解压即玩的完整私服包**。
 
 ## 各文件说明
 
@@ -51,8 +60,17 @@
 
 详细步骤和限制见仓库的账号数据获取与导入说明。协议与服务端支持范围有限，不保证所有版本兼容或百分之百迁移。
 
+## 支持的公服客户端
+
+| 渠道 | 启动方式 | 采集适配 |
+|---|---|---|
+| B 站 PC 版 | 直接选择 `OverField.exe` | 按固定游戏端口采集 |
+| Steam 版 | 选择 Steam 快捷方式（`.url`），经 Steam 启动 | 按服务器地址采集，自动修正隧道网卡帧 |
+
+Steam 版需要先登录 Steam 客户端；启动时若弹出更新或登录窗口，需先完成再进入游戏操作界面。
+
 ## 已验证与限制
 
-启动器 9 项回归测试、备份工具 4 项合成数据测试通过；单机/联机的默认与小窗口布局检查通过，公开包已进行已知个人信息扫描。
+启动器 90 项回归测试、备份工具 4 项合成数据测试通过；单机/联机的默认与小窗口布局检查通过，公开包已进行已知个人信息扫描。Steam 版与 VPN 隧道抓包已在实机验证，可从真实流量解出游戏协议包。
 
 尚未完成另一台干净电脑上的实际游戏启动验证。图标再分发许可、项目代码授权方式和 GPL 等第三方组件的发行义务仍需维护者确认；用户同意发布和上述声明不等于第三方授权。
