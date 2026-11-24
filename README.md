@@ -37,16 +37,6 @@ Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、�
 
 TapTap 适配目前验证了本地登录；场景渲染、持续游玩、其他客户端版本和联机模式尚未完整验证。公服采集仍须通过原版客户端正常认证，本地 UID 登录不会替代公服认证。
 
-## 致谢与声明
-
-感谢各位大佬对服务端部分功能的实现，以及对账号数据采集、备份和解析工具的开发与分享。本项目的相关工作参考了 [BanterSR/Lolo](https://github.com/BanterSR/Lolo) 与 [byzp/of-ps](https://github.com/byzp/of-ps)。具体来源、版本与第三方许可证见 [组件声明](backup-tool/THIRD-PARTY.txt)。
-
-特别感谢 **水音** 提供的采集工具，本项目的公服账号采集与数据解析工作从中受益。
-
-**最终解释权归四川星期零信息科技有限公司。**
-
-本项目为非官方社区工具，与上述公司不存在已确认的授权、合作或背书关系。以上声明不代表公司已授权本项目发布，不替代原游戏的用户协议、知识产权要求或各第三方组件的许可证；本工具自身的维护与缺陷处理由项目维护者负责。
-
 ## 构建
 
 Windows 上需要 .NET Framework 4.x，以及 Visual Studio 2022 的 C++ x64 构建工具：
@@ -149,3 +139,13 @@ python -m unittest test_taptap_private test_official_import test_launcher -v
 ```
 
 测试仅使用合成数据，不需要真实账号。构建后可将 EXE、SDK DLL、图标和必要脚本作为 GitHub Release 附件；不要直接压缩本地工作目录。提交前运行 `python privacy_check.py`，并按 `RELEASE-CHECKLIST.md` 人工复核。
+
+## 致谢与声明
+
+感谢各位大佬对服务端部分功能的实现，以及对账号数据采集、备份和解析工具的开发与分享。本项目的相关工作参考了 [BanterSR/Lolo](https://github.com/BanterSR/Lolo) 与 [byzp/of-ps](https://github.com/byzp/of-ps)。具体来源、版本与第三方许可证见 [组件声明](backup-tool/THIRD-PARTY.txt)。
+
+特别感谢 **水音** 提供的采集工具，本项目的公服账号采集与数据解析工作从中受益。
+
+**最终解释权归四川星期零信息科技有限公司。**
+
+本项目为非官方社区工具，与上述公司不存在已确认的授权、合作或背书关系。以上声明不代表公司已授权本项目发布，不替代原游戏的用户协议、知识产权要求或各第三方组件的许可证；本工具自身的维护与缺陷处理由项目维护者负责。
