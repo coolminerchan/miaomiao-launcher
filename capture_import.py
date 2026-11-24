@@ -91,6 +91,17 @@ def model(kind, data):
     if kind.startswith(('uint', 'int', 'proto.')):
         if isinstance(data, str) and data in ENUMS: return ENUMS[data]
         return int(data)
+    if kind == 'bool':
+        # The server stores these as real JSON booleans; a number fails GPB
+        # deserialization with "mismatch type bool with number at index ...".
+        if isinstance(data, bool): return data
+        if isinstance(data, (int, float)): return bool(data)
+        if isinstance(data, str):
+            lowered = data.strip().lower()
+            if lowered in ('true', '1'): return True
+            if lowered in ('false', '0', ''): return False
+            if lowered in ENUMS: return bool(ENUMS[lowered])
+        return bool(data)
     if kind == 'RandomPropertys': return [model('RandomProperty', value) for value in data]
     if isinstance(data, dict):
         return {key: model('', value) for key, value in data.items()}
