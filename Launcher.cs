@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -317,6 +317,9 @@ namespace OverFieldLocal
             if (String.IsNullOrEmpty(clientExe)) return null;
             var plugins = Path.Combine(Path.GetDirectoryName(clientExe), "launcher_Data", "Plugins", "x86_64");
             if (!Directory.Exists(plugins)) return null;
+            // QuickSDK PC is a separate local adapter; TapTap DLL presence alone
+            // does not identify the active channel (official QuickSDK also ships them).
+            if (File.Exists(Path.Combine(Path.GetDirectoryName(clientExe), "launcher_Data", "Plugins", "Win", "PCSDK_release", "PCSDKUI.exe"))) return null;
             if (File.Exists(Path.Combine(plugins, "PCGameSDK.dll"))) return null;
             if (File.Exists(Path.Combine(plugins, "tapsdkcore.dll")) || File.Exists(Path.Combine(plugins, "taptap_api.dll")))
                 return "TapTap";
@@ -332,9 +335,9 @@ namespace OverFieldLocal
             string channel = UnsupportedChannel(client);
             if (channel != null)
                 throw new InvalidOperationException(
-                    "这是 " + channel + " 渠道包，无法用本地 UID 登录私服。\n"
-                    + "它的登录走 " + channel + " 自己的 SDK，不会加载 PCGameSDK.dll，所以替换无效。\n"
-                    + "请改用 bilibili PC 客户端（含 PCGameSDK.dll 的版本）。");
+                    "检测到 " + channel + " SDK，但未找到已验证的 QuickSDK PC 接入布局。\n"
+                    + "此版本尚未适配，不能仅凭 DLL 名称推断登录方式。\n"
+                    + "请使用已验证的 QuickSDK PC 或 PCGameSDK 客户端版本，并查看分支兼容说明。");
         }
         public Dictionary<string, object> Official(string action, string extra = "")
         {

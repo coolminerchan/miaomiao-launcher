@@ -130,10 +130,21 @@ def prepare_client(root, base, mode):
     original, _ = locate([root])
     if original is None:
         raise FileNotFoundError('Game client not found. Select the folder that contains OverField Game or launcher.exe.')
+    from client_identity import classify, fingerprint, cache_matches, assert_private_destination
     target = base / mode / 'client'
-    if (target / 'client-ready.json').exists():
-        shutil.copy2(Path(__file__).with_name('LocalUidSDK.dll'),target/'launcher_Data/Plugins/x86_64/PCGameSDK.dll')
-        return {'client': str(target / 'launcher.exe')}
+    assert_private_destination(original, target)
+    channel = classify(original)
+    source_identity = fingerprint(original)
+    if cache_matches(original, target / 'client-ready.json'):
+        if channel == 'pcgamesdk':
+            shutil.copy2(Path(__file__).with_name('LocalUidSDK.dll'),target/'launcher_Data/Plugins/x86_64/PCGameSDK.dll')
+        return {'client': str(target / 'launcher.exe'), 'adapter': channel}
+    if target.exists():
+        # Preserve old client copies rather than delete through resource junctions.
+        # Account DB lives outside client and is never moved or reset here.
+        backups = base / mode / 'backups'
+        backups.mkdir(parents=True, exist_ok=True)
+        target.rename(backups / ('client-before-source-change-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')))
     target.mkdir(parents=True, exist_ok=True)
     def junction(destination, source):
         if destination.exists(): return
@@ -143,23 +154,29 @@ def prepare_client(root, base, mode):
         destination = target / entry.name
         if entry.is_file():
             if not destination.exists(): shutil.copy2(entry,destination)
-        elif entry.name != 'launcher_Data': junction(destination,entry)
+        elif entry.name != 'launcher_Data':
+            # Never share writable channel account/cache directories with official client.
+            shutil.copytree(entry, destination, ignore=shutil.ignore_patterns('cache','Cache','*.log','*_log.txt','Cookies*'))
     data = target / 'launcher_Data'
     data.mkdir(exist_ok=True)
     for entry in (original / 'launcher_Data').iterdir():
         destination = data / entry.name
         if entry.is_file(): shutil.copy2(entry,destination)
+        elif entry.name == 'Quicksdk':
+            # QuickSDK only writes diagnostics here; do not copy official token logs.
+            destination.mkdir(exist_ok=True)
         elif entry.name == 'Plugins':
-            if not destination.exists(): shutil.copytree(entry,destination)
+            if not destination.exists(): shutil.copytree(entry,destination,ignore=shutil.ignore_patterns('cache','Cache','*.log','*_log.txt','logs','Cookies*'))
         elif entry.name == 'StreamingAssets':
             destination.mkdir(exist_ok=True)
             for child in entry.iterdir():
                 if child.is_file(): shutil.copy2(child,destination/child.name)
                 else: junction(destination/child.name,child)
         else: junction(destination,entry)
-    shutil.copy2(Path(__file__).with_name('LocalUidSDK.dll'),data/'Plugins/x86_64/PCGameSDK.dll')
-    write_json(target/'client-ready.json',{'source':str(original),'localUidSdk':True})
-    return {'client':str(target/'launcher.exe')}
+    if channel == 'pcgamesdk':
+        shutil.copy2(Path(__file__).with_name('LocalUidSDK.dll'),data/'Plugins/x86_64/PCGameSDK.dll')
+    write_json(target/'client-ready.json',{'source':str(original),'fingerprint':source_identity['identity'],'adapter':channel,'localUidSdk':channel=='pcgamesdk'})
+    return {'client':str(target/'launcher.exe'),'adapter':channel}
 
 
 def previous_route(settings):
