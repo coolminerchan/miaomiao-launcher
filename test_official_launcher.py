@@ -31,12 +31,88 @@ class OfficialLauncherTests(unittest.TestCase):
         self.assertEqual(launcher.validate_launcher(self.exe,self.base),self.exe.resolve())
     def test_visible_launch_has_no_private_args_or_environment(self):
         with patch.dict(os.environ,{'LOLO_SDK_UID':'123','lolo_dispatch_host':'private','PATH':'normal'}), patch.object(launcher.subprocess,'Popen') as spawn:
-            launcher.launch_official(self.exe,self.base)
+            launched=launcher.launch_official(self.exe,self.base)
         args,kwargs=spawn.call_args
         self.assertEqual(args[0],[str(self.exe.resolve())]);self.assertEqual(kwargs['creationflags'],0)
         self.assertEqual(kwargs['cwd'],str(self.exe.parent))
         self.assertFalse(any(k.upper().startswith('LOLO_') for k in kwargs['env']))
         self.assertEqual(kwargs['env']['PATH'],'normal')
+        self.assertEqual(launched.kind,'exe')
+
+
+class SteamShortcutTests(unittest.TestCase):
+    """A Steam .url shortcut is an accepted official channel, launched by protocol."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name);self.base=self.root/'app';self.base.mkdir()
+        self.shortcut=self.root/'OverField.url'
+        self.shortcut.write_text('[InternetShortcut]\nURL=steam://rungameid/3879660\nIconIndex=0\n',encoding='utf-8')
+        self.install=self.root/'steamapps/common/OverField';self.install.mkdir(parents=True)
+        (self.install/'launcher.exe').write_bytes(b'MZ-steam')
+    def test_steam_shortcut_is_accepted(self):
+        with patch.object(launcher,'steam_install_dir',return_value=self.install):
+            self.assertEqual(launcher.validate_launcher(self.shortcut,self.base),self.shortcut.resolve())
+    def test_app_id_is_read_from_shortcut(self):
+        self.assertEqual(launcher.steam_app_id(self.shortcut),'3879660')
+    def test_non_steam_shortcut_is_rejected(self):
+        other=self.root/'Other.url';other.write_text('[InternetShortcut]\nURL=https://example.com\n',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'Steam'):
+            launcher.steam_app_id(other)
+    def test_shortcut_without_url_is_rejected(self):
+        other=self.root/'Empty.url';other.write_text('[InternetShortcut]\n',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'URL'):
+            launcher.steam_app_id(other)
+    def test_unknown_suffix_is_rejected(self):
+        other=self.root/'notes.txt';other.write_text('hello',encoding='utf-8')
+        with self.assertRaises(ValueError):
+            launcher.validate_launcher(other,self.base)
+    def test_steam_shortcut_inside_private_profiles_is_rejected(self):
+        private=self.base/'profiles/solo/OverField.url';private.parent.mkdir(parents=True)
+        private.write_text('[InternetShortcut]\nURL=steam://rungameid/3879660\n',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'profiles'):
+            launcher.validate_launcher(private,self.base)
+    def test_steam_install_with_private_marker_is_rejected(self):
+        (self.install/'client-ready.json').write_text('{}')
+        with patch.object(launcher,'steam_install_dir',return_value=self.install):
+            with self.assertRaisesRegex(ValueError,'私服客户端副本'):
+                launcher.validate_launcher(self.shortcut,self.base)
+    def test_launch_uses_protocol_handler_and_returns_pid(self):
+        with patch.object(launcher,'steam_install_dir',return_value=self.install), \
+             patch.object(launcher.os,'startfile') as startfile, \
+             patch.object(launcher,'_await_steam_game',return_value=4242) as await_game:
+            launched=launcher.launch_official(self.shortcut,self.base)
+        startfile.assert_called_once_with('steam://rungameid/3879660')
+        await_game.assert_called_once_with(self.install)
+        self.assertEqual((launched.pid,launched.kind),(4242,'steam'))
+    def test_steam_launch_never_spawns_a_private_process(self):
+        with patch.object(launcher,'steam_install_dir',return_value=self.install), \
+             patch.object(launcher.os,'startfile'), \
+             patch.object(launcher,'_await_steam_game',return_value=0), \
+             patch.dict(os.environ,{'LOLO_SDK_UID':'9'}), \
+             patch.object(launcher.subprocess,'Popen') as spawn:
+            launcher.launch_official(self.shortcut,self.base)
+        spawn.assert_not_called()
+    def test_install_dir_is_none_when_manifest_missing(self):
+        with patch.object(launcher,'_steam_roots',return_value=[self.root]):
+            self.assertIsNone(launcher.steam_install_dir('999999'))
+    def test_install_dir_is_read_from_manifest(self):
+        apps=self.root/'steamapps';apps.mkdir(exist_ok=True)
+        (apps/'appmanifest_3879660.acf').write_text('"AppState"\n{\n\t"installdir"\t\t"OverField"\n}\n',encoding='utf-8')
+        with patch.object(launcher,'_steam_roots',return_value=[self.root]):
+            self.assertEqual(launcher.steam_install_dir('3879660'),self.install)
+    def write_config(self,text):
+        config=self.install/'launcher_Data/StreamingAssets/Config.txt';config.parent.mkdir(parents=True,exist_ok=True)
+        config.write_text(text,encoding='utf-8')
+    def test_server_address_is_read_for_runtime_port_channels(self):
+        self.write_config('[服务器配置]\nUseCustomConfig = FALSE\nLocalServerIP = 192.168.0.123\nRemoteServerIP = 139.196.33.142\n')
+        self.assertEqual(launcher.server_addresses(self.install),['139.196.33.142'])
+    def test_private_addresses_are_not_used_as_capture_targets(self):
+        self.write_config('LocalServerIP = 192.168.0.123\nRemoteServerIP = 127.0.0.1\n')
+        self.assertEqual(launcher.server_addresses(self.install),[])
+    def test_missing_config_yields_no_addresses(self):
+        self.assertEqual(launcher.server_addresses(self.install),[])
+    def test_missing_install_yields_no_addresses(self):
+        self.assertEqual(launcher.server_addresses(None),[])
 
 
 class CaptureStartOrderTests(unittest.TestCase):
@@ -61,7 +137,7 @@ class CaptureStartOrderTests(unittest.TestCase):
         return self.proc
     def spawn_public(self,value,base):
         self.assertTrue(capture.read_state()['active']);self.events.append('official')
-        return Mock(pid=99)
+        return launcher.Launched(99,'exe',None)
     def contexts(self):
         return (patch.object(capture,'preflight',return_value={'ok':True,'problems':[]}),
                 patch.object(capture,'python_exe',return_value=Path('decode-python.exe')),

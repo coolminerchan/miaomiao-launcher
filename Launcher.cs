@@ -542,7 +542,10 @@ namespace OverFieldLocal
                 {
                     var result = await Task.Run(() => backend.Official("start"));
                     captureRunning = true; lastCaptureZip = "";
-                    Append("抓包已就绪，已启动配置的公服启动器。公服路径未使用私服副本或本地UID。");
+                    bool steam = result.ContainsKey("officialKind") && Convert.ToString(result["officialKind"])=="steam";
+                    Append(steam ? "抓包已就绪，正在通过 Steam 启动客户端。公服路径未使用私服副本或本地UID。" : "抓包已就绪，已启动配置的公服启动器。公服路径未使用私服副本或本地UID。");
+                    if (steam && result.ContainsKey("officialPid") && Convert.ToInt32(result["officialPid"])==0)
+                        Append("Steam 正在启动游戏；如果它弹出登录或更新窗口，请先完成，进入游戏后开始加载要保存的界面。");
                     if (result.ContainsKey("hint")) Append(Convert.ToString(result["hint"]));
                     captureHint.Text = "采集中：公服启动器已打开，请正常登录并加载要保存的界面，完成后点「结束采集」。";
                 }
@@ -801,7 +804,7 @@ namespace OverFieldLocal
         {
             if(busy || captureRunning || closing) return false;
             string selected;
-            using(var dialog = new OpenFileDialog { Title="选择公服启动器或原版客户端（与私服目录独立）", Filter="公服启动器 EXE|*.exe", CheckFileExists=true, Multiselect=false, FileName=backend.OfficialLauncherPath })
+            using(var dialog = new OpenFileDialog { Title="选择公服启动器、原版客户端，或 Steam 游戏快捷方式", Filter="公服启动器 / Steam 快捷方式|*.exe;*.url|可执行文件|*.exe|Steam 快捷方式|*.url", CheckFileExists=true, Multiselect=false, FileName=backend.OfficialLauncherPath })
             { if(dialog.ShowDialog(this)!=DialogResult.OK) return false; selected=dialog.FileName; }
             SetBusy(true, "正在校验公服启动器路径");
             try
@@ -810,7 +813,11 @@ namespace OverFieldLocal
                 if(closing) return false;
                 backend.OfficialLauncherPath=Convert.ToString(info["path"]);
                 backend.Save(); officialLauncherPath.Text=backend.OfficialLauncherPath;
-                Append("公服启动器路径已独立保存，私服游戏目录未改变。");
+                if(info.ContainsKey("kind") && Convert.ToString(info["kind"])=="steam") {
+                    string install=info.ContainsKey("install")?Convert.ToString(info["install"]):"";
+                    Append("已识别 Steam 客户端（App "+Convert.ToString(info["appId"])+"）"+(install.Length>0?"："+install:"")+"。采集时将通过 Steam 启动，需先登录 Steam。");
+                }
+                else Append("公服启动器路径已独立保存，私服游戏目录未改变。");
                 return true;
             }
             catch(Exception error) { Append(error.Message); MessageBox.Show(this,error.Message,"公服路径不可用",MessageBoxButtons.OK,MessageBoxIcon.Warning); return false; }

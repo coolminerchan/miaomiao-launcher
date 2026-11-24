@@ -179,6 +179,12 @@ def start(launcher_path=None) -> dict:
     session.mkdir(parents=True, exist_ok=True)
     STOP_FLAG.unlink(missing_ok=True)
     ready_path = session / "capture-ready.json"
+    from official_launcher import steam_app_id, steam_install_dir, server_addresses
+    server_ips = []
+    if steam_app_id(launcher) is not None:
+        # The Steam build assigns game ports at runtime, so capture its server
+        # addresses instead of relying on the fixed Bilibili port list.
+        server_ips = server_addresses(steam_install_dir(steam_app_id(launcher)))
     command = [
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", str(BASE / "backup-tool" / "capture.ps1"), "-Mode", "Account",
@@ -186,6 +192,8 @@ def start(launcher_path=None) -> dict:
         "-TSharkExe", str(tshark_exe()), "-StopFlag", str(STOP_FLAG),
         "-ReadyPath", str(ready_path),
     ]
+    if server_ips:
+        command += ["-ServerIps", ",".join(server_ips)]
     with (session / "capture-worker.stdout.log").open("ab") as out, (session / "capture-worker.stderr.log").open("ab") as err:
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                    cwd=str(BASE / "backup-tool"), creationflags=NO_WINDOW,
@@ -202,9 +210,11 @@ def start(launcher_path=None) -> dict:
         request_failed_start_stop(process, state)
         raise
     state["officialPid"] = official.pid
+    state["officialKind"] = official.kind
     write_state(state)
     log(f"抓包已就绪，公服启动器已打开 -> {launcher}")
     return {"session": str(session), "officialLauncherPath": str(launcher), "officialPid": official.pid,
+            "officialKind": official.kind,
             "hint": "抓包已开始，公服启动器已打开。请正常登录并进入场景；若客户端已在运行，请退出后重新打开以采集登录响应。"}
 
 
@@ -381,8 +391,14 @@ def main() -> int:
             from capture_zip import export_account_zip
             result = export_account_zip(args.file, args.destination)
         elif args.action == "validate-launcher":
-            from official_launcher import validate_launcher
-            result = {"path": str(validate_launcher(args.launcher, BASE))}
+            from official_launcher import validate_launcher, steam_app_id, steam_install_dir
+            path = validate_launcher(args.launcher, BASE)
+            app_id = steam_app_id(path)
+            result = {"path": str(path)}
+            if app_id is not None:
+                install = steam_install_dir(app_id)
+                result.update(kind="steam", appId=app_id,
+                              install=str(install) if install else "")
         elif args.action == "start":
             result = start(args.launcher)
         else:
