@@ -57,6 +57,18 @@ function Test-Port([string]$Address, [int]$Port) {
     try { $taskConnect=$taskSocket.ConnectAsync($Address,$Port); return $taskConnect.Wait(800) -and $taskSocket.Connected }
     catch { return $false } finally { $taskSocket.Dispose() }
 }
+function Test-FirewallRules([string[]]$Names) {
+    # Get-NetFirewallRule costs about a second per call, which stalls every status
+    # refresh in host mode. The stored rule blobs expose the same Enabled flag.
+    $path = 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules'
+    try { $rules = Get-ItemProperty -LiteralPath $path -ErrorAction Stop } catch { return $false }
+    $enabled = 0
+    foreach ($name in $Names) {
+        $rule = $rules.PSObject.Properties | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        if ($rule -and ([string]$rule.Value) -match '\|Active=TRUE(\||$)') { $enabled++ }
+    }
+    return $enabled -eq $Names.Count
+}
 function Test-Ports([object[]]$Targets, [int]$TimeoutMilliseconds = 250) {
     # A closed port always burns the full timeout, so probe all of them at once
     # instead of paying that cost three times in a row.
@@ -159,7 +171,7 @@ function Invoke-World {
         $taskHttpUp=$taskProbes[0]
         $taskGateUp=$taskProbes[1]
         $taskFirewall=$false
-        if ($Mode -eq 'host') { try { $taskFirewall=@(Get-NetFirewallRule -Name 'OverFieldLocal-LAN','OverFieldLocal-LAN-Gateway' -ErrorAction Stop | Where-Object { $_.Enabled -eq 'True' }).Count -eq 2 } catch { } }
+        if ($Mode -eq 'host') { $taskFirewall=Test-FirewallRules 'OverFieldLocal-LAN','OverFieldLocal-LAN-Gateway' }
         [pscustomobject]@{
             HttpListening=$taskHttpUp; GatewayListening=$taskGateUp; ProxyListening=$taskProbes[2]
             ServerRunning=$taskSame -and (Process-Matches $taskState.Server)

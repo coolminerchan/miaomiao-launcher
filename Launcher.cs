@@ -638,13 +638,31 @@ namespace OverFieldLocal
         async Task SwitchMode(string mode)
         {
             if(busy || backend.Mode==mode) return;
-            {int guard=0;while(checking && !closing && guard++<40) await Task.Delay(50);}
+            // Claim busy before any await: rapid clicks otherwise start several switch
+            // chains at once, and their Stop/Refresh interleave into a stalled UI.
+            busy = true;
+            SetBusy(true, "正在切换运行模式");
+            try
+            {
+                {int guard=0;while(checking && !closing && guard++<40) await Task.Delay(50);}
+                if(closing) return;
+                if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再切换运行模式。"); return; }
+                if(lastStatus!=null && !String.IsNullOrEmpty(lastStatus.RuntimeMode))
+                {
+                    await Task.Run(() => backend.Run("Stop"));
+                }
+                if(closing) return;
+                ShowCapturePage(false);
+                backend.Mode=mode; backend.Save(); ApplyMode();
+                Append(mode=="solo" ? "已切换到单机，使用本电脑的独立单机存档。" : "已切换到局域网服务端，使用独立联机存档。");
+            }
+            catch (Exception error) { Append("切换失败：" + error.Message); }
+            finally
+            {
+                busy = false;
+                if(!closing) SetBusy(false, "");
+            }
             if(closing) return;
-            if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再切换运行模式。"); return; }
-            if(lastStatus!=null && !String.IsNullOrEmpty(lastStatus.RuntimeMode)) await Operate("Stop",false);
-            if(closing) return;
-            ShowCapturePage(false);
-            backend.Mode=mode; backend.Save(); ApplyMode(); Append(mode=="solo" ? "已切换到单机，使用本电脑的独立单机存档。" : "已切换到局域网服务端，使用独立联机存档。");
             await RefreshStatus();
         }
         async Task ImportCapture()
