@@ -13,7 +13,7 @@ ALLOWED = {
     'repair_version.py', 'lolo_redirect.py', 'test_launcher.py',
     'README.md', 'requirements.txt', '.gitignore', 'privacy_check.py',
     'RELEASE-CHECKLIST.md', 'RELEASE-NOTES.md', 'test_backup_tool.py',
-    'docs/login-and-data.md', 'docs/release-audit.md', 'preflight.py',
+    'docs/login-and-data.md', 'docs/release-audit.md', 'docs/channel-login.md', 'preflight.py',
     'backup-tool/1_backup_account.cmd', 'backup-tool/2_backup_gardens.cmd',
     'backup-tool/3_decode_pcap.cmd', 'backup-tool/capture.ps1',
     'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py',
