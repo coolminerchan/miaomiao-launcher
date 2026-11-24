@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -79,22 +79,25 @@ namespace OverFieldLocal
             var shell=Grid(2,1);shell.BackColor=Theme.Bg;
             shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,222));shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));Controls.Add(shell);
             var sideScroll=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Color.FromArgb(222,240,241),Margin=Padding.Empty};shell.Controls.Add(sideScroll,0,0);
-            var side=Grid(1,12);side.Dock=DockStyle.Top;side.Height=704;side.Padding=new Padding(20,28,20,24);
+            var side=Grid(1,18);side.Dock=DockStyle.Top;side.Height=892;side.Padding=new Padding(20,28,20,24);
             side.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int height in new[]{36,24,44,58,56,12,58,56,16,54,28,98})side.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+            foreach(int height in new[]{36,22,44,52,30,8,52,30,8,52,30,8,52,30,14,40,26,96})side.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
             sideScroll.Controls.Add(side);
             side.Controls.Add(FitLabel("开放空间",18,Theme.Text,FontStyle.Bold),0,0);
             side.Controls.Add(FitLabel("O V E R F I E L D",8.5f,Theme.Muted),0,1);
             side.Controls.Add(FitLabel("选择你的世界",10,Theme.Muted),0,2);
             SpaceButton(soloMode,true);side.Controls.Add(soloMode,0,3);
-            side.Controls.Add(FitLabel("仅本机连接\n独立单机存档",9,Theme.Muted),0,4);
+            side.Controls.Add(FitLabel("仅本机连接 · 独立单机存档",9,Theme.Muted),0,4);
             SpaceButton(hostMode,true);side.Controls.Add(hostMode,0,6);
-            side.Controls.Add(FitLabel("发布局域网服务\n独立联机存档",9,Theme.Muted),0,7);
-            SpaceButton(roomsButton,true);side.Controls.Add(roomsButton,0,9);
-            side.Controls.Add(FitLabel("LOCAL WORLD",8,Theme.Accent,FontStyle.Bold),0,10);
-            side.Controls.Add(FitLabel("以自己的 UID 开始\n数据只保存在本电脑\n请勿公开私人存档",9,Theme.Muted),0,11);
+            side.Controls.Add(FitLabel("发布局域网服务 · 独立联机存档",9,Theme.Muted),0,7);
+            SpaceButton(captureMode,true);side.Controls.Add(captureMode,0,9);
+            side.Controls.Add(FitLabel("官方客户端采集账号数据",9,Theme.Muted),0,10);
+            SpaceButton(roomsButton,true);side.Controls.Add(roomsButton,0,12);
+            side.Controls.Add(FitLabel("查看在线玩家与房间",9,Theme.Muted),0,13);
+            side.Controls.Add(FitLabel("LOCAL WORLD",8,Theme.Accent,FontStyle.Bold),0,15);
+            side.Controls.Add(FitLabel("以自己的 UID 开始\n数据只保存在本电脑\n请勿公开私人存档",9,Theme.Muted),0,16);
 
-            var scroll=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Margin=Padding.Empty,BackColor=Theme.Bg};shell.Controls.Add(scroll,1,0);
+            var scroll=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Margin=Padding.Empty,BackColor=Theme.Bg};shell.Controls.Add(scroll,1,0);mainScroll=scroll;
             var layout=Grid(1,8);layout.Dock=DockStyle.Top;layout.Padding=new Padding(26,24,26,22);layout.Height=970;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             foreach(int height in new[]{132,88,84,150,112,124,132,34})layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
@@ -131,17 +134,22 @@ namespace OverFieldLocal
             profileLabel.Dock=DockStyle.Fill;profileLabel.AutoEllipsis=true;profileLabel.Font=Theme.Font(9);profileLabel.ForeColor=Theme.Muted;profileLabel.TextAlign=ContentAlignment.MiddleLeft;profileLabel.Margin=Padding.Empty;dataRows.Controls.Add(profileLabel,0,0);
             var dataActions=Grid(4,1);for(int i=0;i<4;i++)dataActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=0;foreach(var b in new[]{importData,backupData,openData,firewall}){SpaceButton(b,index==3);dataActions.Controls.Add(b,index++,0);}dataRows.Controls.Add(dataActions,0,1);layout.Controls.Add(dataPanel,0,5);
 
-            var capturePanel=new Surface{Dock=DockStyle.Fill,Padding=new Padding(20,12,20,14),Margin=new Padding(0,0,0,18)};
-            var captureRows=Grid(1,3);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            foreach(int h in new[]{28,46,52})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePanel.Controls.Add(captureRows);
-            captureRows.Controls.Add(FitLabel("公服账号采集",10,Theme.Text,FontStyle.Bold),0,0);
-            captureHint.Dock=DockStyle.Fill;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(8.5f);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.MiddleLeft;captureHint.Margin=Padding.Empty;
-            captureHint.Text="先点「启动公服采集」，再用自己的渠道账号登录官方客户端；进入游戏并打开要保存的界面后点「结束采集」，数据会直接写入当前模式的账号库。";
+            capturePage=new Surface{Dock=DockStyle.Fill,Padding=new Padding(24,18,24,20),Margin=Padding.Empty,Visible=false};
+            var captureRows=Grid(1,5);captureRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            foreach(int h in new[]{34,66,10,124,116})captureRows.RowStyles.Add(new RowStyle(SizeType.Absolute,h));capturePage.Controls.Add(captureRows);
+            captureRows.Controls.Add(FitLabel("公服账号采集",11,Theme.Text,FontStyle.Bold),0,0);
+            captureHint.Dock=DockStyle.Fill;captureHint.AutoSize=false;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(9);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.TopLeft;captureHint.Margin=Padding.Empty;
+            captureHint.Text="用你自己的渠道账号登录官方客户端，采集到的数据只写入本机账号库。";
             captureRows.Controls.Add(captureHint,0,1);
-            var captureActions=Grid(2,1);for(int i=0;i<2;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
+            var captureActions=Grid(1,2);for(int i=0;i<2;i++)captureActions.RowStyles.Add(new RowStyle(SizeType.Percent,50));
             SpaceButton(captureStart);SpaceButton(captureStop,true);
-            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,1,0);
-            captureRows.Controls.Add(captureActions,0,2);layout.Controls.Add(capturePanel,0,4);
+            
+            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,0,1);
+            captureRows.Controls.Add(captureActions,0,3);
+            captureSteps.Dock=DockStyle.Fill;captureSteps.AutoSize=false;captureSteps.Font=Theme.Font(9);captureSteps.ForeColor=Theme.Muted;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.TextAlign=ContentAlignment.TopLeft;captureSteps.Margin=Padding.Empty;
+            captureSteps.Text="1. 点「开始采集」，按提示允许管理员权限\n2. 退出并重新打开官方客户端，用自己的账号登录并进入场景\n3. 依次打开角色、背包、装备、宠物、邮件、家园等界面，等加载完成\n4. 回到启动器点「结束采集」，数据会写入当前模式的账号库\n5. 采集期间请勿开启本地私服或转发工具";
+            captureRows.Controls.Add(captureSteps,0,4);
+            scroll.Controls.Add(capturePage);
 
             var logPanel=new Surface{Dock=DockStyle.Fill,Margin=Padding.Empty,Padding=new Padding(20,12,20,14)};
             var logRows=Grid(1,2);logRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));logRows.RowStyles.Add(new RowStyle(SizeType.Absolute,30));logRows.RowStyles.Add(new RowStyle(SizeType.Percent,100));logPanel.Controls.Add(logRows);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -388,12 +388,15 @@ namespace OverFieldLocal
         readonly Backend backend = new Backend();
         readonly StatusTile server = new StatusTile("服务端"), gateway = new StatusTile("游戏网关"), proxy = new StatusTile("游戏连接");
         readonly ActionButton start = new ActionButton("启动游戏  →", true), services = new ActionButton("启动服务"), stop = new ActionButton("停止服务"), browse = new ActionButton("更改目录");
-        readonly ActionButton captureStart = new ActionButton("启动公服采集"), captureStop = new ActionButton("结束采集");
+        readonly ActionButton captureStart = new ActionButton("开始采集"), captureStop = new ActionButton("结束采集");
         readonly Label captureHint = new Label();
-        readonly ActionButton soloMode = new ActionButton("单机模式"), hostMode = new ActionButton("局域网服务"), importData = new ActionButton("导入数据"), backupData = new ActionButton("备份存档"), openData = new ActionButton("数据目录"), firewall = new ActionButton("局域网权限"), roomsButton=new ActionButton("房间与玩家");
+        readonly ActionButton soloMode = new ActionButton("单机模式"), hostMode = new ActionButton("局域网服务"), captureMode = new ActionButton("公服采集"), importData = new ActionButton("导入数据"), backupData = new ActionButton("备份存档"), openData = new ActionButton("数据目录"), firewall = new ActionButton("局域网权限"), roomsButton=new ActionButton("房间与玩家");
         readonly NumericUpDown uidBox = new NumericUpDown();
         readonly ComboBox hostBox = new ComboBox();
         readonly Label profileLabel = new Label(), modeHint = new Label();
+        Surface capturePage;
+        Panel mainScroll;
+        readonly Label captureSteps = new Label();
         readonly Label headline = new Label(), subtitle = new Label(), badge = new Label(), footer = new Label();
         readonly TextBox rootPath = new TextBox();
         readonly RichTextBox logs = new RichTextBox();
@@ -403,7 +406,7 @@ namespace OverFieldLocal
         ServiceStatus lastStatus;
         string lastStatusError, smokePath;
         bool verify, uiPreview;
-        string uiPreviewDir;
+        string uiPreviewDir, uiPage="";
         public LauncherForm(string[] args)
         {
             Text = "开放空间 · 本地启动器"; Font = Theme.Font(10); BackColor = Theme.Bg; ForeColor = Theme.Text;
@@ -416,12 +419,15 @@ namespace OverFieldLocal
                 else if (args[i] == "--verify") verify = true;
                 else if (args[i] == "--ui-preview" && i + 1 < args.Length) { uiPreview=true;uiPreviewDir=args[++i]; }
                 else if (args[i] == "--ui-mode" && i + 1 < args.Length) { string m=args[++i];if(m=="solo"||m=="host")backend.Mode=m; }
+                else if (args[i] == "--ui-page" && i + 1 < args.Length) { uiPage=args[++i]; }
                 else if (args[i] == "--ui-size" && i + 1 < args.Length) { string[] s=args[++i].Split('x');int w,h;if(s.Length==2 && Int32.TryParse(s[0],out w) && Int32.TryParse(s[1],out h))ClientSize=new Size(Math.Max(1024,w),Math.Max(700,h)); }
             }
             if(uiPreview) { backend.HostAddress="192.168.1.10";backend.Uid=1000000;backend.Root=""; }
             BuildLayout();
             ApplyMode();
+            ShowCapturePage(false);
             soloMode.Click += async delegate { await SwitchMode("solo"); };
+            captureMode.Click += delegate { ShowCapturePage(true); };
             hostMode.Click += async delegate { await SwitchMode("host"); };
             uidBox.ValueChanged += delegate { if (!busy) { backend.Uid=(uint)uidBox.Value; backend.Save(); } };
             hostBox.SelectedIndexChanged += delegate { if (!busy && backend.Mode=="host" && hostBox.SelectedItem != null) { backend.HostAddress=hostBox.SelectedItem.ToString(); backend.Save(); } };
@@ -500,7 +506,7 @@ namespace OverFieldLocal
             timer.Interval = 5000; timer.Tick += async delegate { await RefreshStatus(); };
             Shown += async delegate
             {
-                if(uiPreview) { await Task.Delay(400); SaveUIPreview(uiPreviewDir); Close(); return; }
+                if(uiPreview) { await Task.Delay(400); if(uiPage=="capture") ShowCapturePage(true); await Task.Delay(150); SaveUIPreview(uiPreviewDir); Close(); return; }
                 Append("启动器已就绪，正在读取本地服务状态。");
                 await RefreshStatus(); if (closing) return; timer.Start();
                 if (verify) await Verify();
@@ -599,6 +605,18 @@ namespace OverFieldLocal
             logPanel.Controls.Add(logs); logPanel.Controls.Add(logHead); layout.Controls.Add(logPanel, 0, 6);
             footer.Text = "可随时退出 · 游戏与服务独立运行 · 两种模式的存档分开保存"; footer.ForeColor = Theme.Muted; footer.Font = Theme.Font(8.5f); footer.Dock = DockStyle.Fill; footer.TextAlign = ContentAlignment.BottomLeft; layout.Controls.Add(footer, 0, 7);
         }
+        void ShowCapturePage(bool show)
+        {
+            if (capturePage != null) capturePage.Visible = show;
+            if (mainScroll != null && mainScroll.Controls.Count > 1)
+                mainScroll.Controls[0].Visible = !show;
+            if (show && captureHint != null && String.IsNullOrWhiteSpace(captureHint.Text))
+                captureHint.Text = "用你自己的渠道账号登录官方客户端，采集到的数据只写入本机账号库。";
+            captureMode.Primary = show;
+            soloMode.Primary = !show && backend.Mode == "solo";
+            hostMode.Primary = !show && backend.Mode == "host";
+            captureMode.Invalidate(); soloMode.Invalidate(); hostMode.Invalidate();
+        }
         void ApplyMode()
         {
             soloMode.Primary=backend.Mode=="solo"; hostMode.Primary=backend.Mode=="host"; soloMode.Invalidate(); hostMode.Invalidate();
@@ -625,6 +643,7 @@ namespace OverFieldLocal
             if(lastStatus!=null && lastStatus.ClientRunning) { Append("请先退出游戏，再切换运行模式。"); return; }
             if(lastStatus!=null && !String.IsNullOrEmpty(lastStatus.RuntimeMode)) await Operate("Stop",false);
             if(closing) return;
+            ShowCapturePage(false);
             backend.Mode=mode; backend.Save(); ApplyMode(); Append(mode=="solo" ? "已切换到单机，使用本电脑的独立单机存档。" : "已切换到局域网服务端，使用独立联机存档。");
             await RefreshStatus();
         }
@@ -673,6 +692,7 @@ namespace OverFieldLocal
             if (closing) return;
             busy = value; start.Enabled = services.Enabled = !value; stop.Enabled = true;
             soloMode.Enabled=hostMode.Enabled=importData.Enabled=backupData.Enabled=!value;
+            captureMode.Enabled = !value;
             uidBox.Enabled=!value && (lastStatus==null || !lastStatus.ClientRunning); hostBox.Enabled=!value && backend.Mode=="host" && (lastStatus==null || String.IsNullOrEmpty(lastStatus.RuntimeMode)); firewall.Enabled=!value && backend.Mode=="host";
             stop.Text = value ? "取消操作" : "停止服务";
             browse.Enabled = !value && lastStatus != null && !lastStatus.ServerRunning && !lastStatus.ProxyRunning;
