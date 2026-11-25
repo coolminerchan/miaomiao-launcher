@@ -103,17 +103,18 @@ function Clear-PreviousBackupCapture {
     if ($status -notmatch $idlePattern) {
         $backupLogPattern = '(?im)^[^:：\r\n]+[:：][ \t]*"?' +
             '(?<etl>(?:[a-z]:|\\\\[^\\\r\n]+\\[^\\\r\n]+)(?:\\[^\\\r\n"]+)*' +
-            '\\(?:account|gardens)_\d{8}_\d{6}_\d{3}\\capture\.etl)"?[ \t]*\r?$'
+            '\\(?:account|gardens)_\d{8}_\d{6}_\d{3}\\(?:capture|segment_\d+)\.etl)"?[ \t]*\r?$'
         $logMatch = [regex]::Match($status, $backupLogPattern)
         if (-not $logMatch.Success -or (Get-PacketMonitorFilterState) -ne 'Backup') {
             throw "无法确认 PktMon 会话属于本备份工具。请在原诊断窗口结束会话。当前状态 $status"
         }
         $previousEtl = $logMatch.Groups['etl'].Value
-        if (-not (Test-Path -LiteralPath $previousEtl -PathType Leaf)) {
-            throw "无法验证上一轮抓包文件 $previousEtl 。请先检查 PktMon 会话。"
-        }
         Invoke-PacketMonitor @('stop') | Out-Null
-        Write-Host "已停止上一轮备份抓包。原始文件保存在 $previousEtl"
+        if (Test-Path -LiteralPath $previousEtl -PathType Leaf) {
+            Write-Host "已停止上一轮备份抓包。原始文件保存在 $previousEtl"
+        } else {
+            Write-Host "已停止上一轮残留备份抓包（原文件已不存在：$previousEtl）。"
+        }
     }
     Remove-BackupFilters
 }
@@ -157,65 +158,91 @@ try {
         Invoke-PacketMonitor @('filter', 'add', $label, '-t', 'TCP', '-i', $address) | Out-Null
         $filtersAdded = $true
     }
-    # PktMon buffers events until the trace stops, so a single long trace stays
-    # empty on disk until the very end. Rotate short traces instead: each stop
-    # flushes a finished segment, and the segments are concatenated into one
-    # pcapng (multi-section) so the live checklist can read real data.
-    $segmentSeconds = 12
-    $segment = 0
-    $first = $true
-    while ($true) {
-        $segment++
-        $segmentEtl = Join-Path $sessionPath ("segment_{0:d3}.etl" -f $segment)
-        Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $segmentEtl) | Out-Null
+    if (-not $StopFlag) {
+        Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $etl) | Out-Null
         $started = $true
-        if ($first) {
-            $first = $false
-            if ($ReadyPath) {
-                $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
-                [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
-                Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
-            }
-            Write-Host "抓包已开始。输出目录 $sessionPath"
-            $observer = Join-Path (Split-Path $PSScriptRoot -Parent) 'capture_checklist.py'
-            if ($Mode -eq 'Account' -and $StopFlag -and (Test-Path -LiteralPath $observer)) {
-                $liveDir = Join-Path $sessionPath 'live-progress'
-                New-Item -ItemType Directory -Path $liveDir -Force | Out-Null
-                try {
-                    $arguments = '-B -X utf8 "' + $observer + '" watch --capture-root "' + $sessionPath + '"'
-                    $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
-                } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
-            }
-            if ($Mode -eq 'Account') {
-                Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
-                Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
-                Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
-            } else {
-                Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
-            }
+        if ($ReadyPath) {
+            $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
+            [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
+            Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
         }
-        $offset = 0
-        while ($offset -lt $segmentSeconds) {
-            if ($AutoStopSeconds -gt 0 -and ($segment - 1) * $segmentSeconds + $offset -ge $AutoStopSeconds) { break }
-            if ($StopFlag -and (Test-Path -LiteralPath $StopFlag)) { break }
-            Start-Sleep -Milliseconds 500
-            $offset += 0.5
+        Write-Host "抓包已开始。输出目录 $sessionPath"
+        if ($Mode -eq 'Account') {
+            Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
+            Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
+            Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
+        } else {
+            Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
+        }
+        if ($AutoStopSeconds -gt 0) {
+            Start-Sleep -Seconds $AutoStopSeconds
+        } else {
+            Read-Host '采集完成后，请回到本窗口按回车键结束抓包并自动导出' | Out-Null
         }
         Invoke-PacketMonitor @('stop') | Out-Null
         $started = $false
-        if (Test-Path -LiteralPath $segmentEtl -PathType Leaf) {
-            $segmentPcap = Join-Path $sessionPath ("segment_{0:d3}.pcapng" -f $segment)
-            Invoke-PacketMonitor @('etl2pcap', $segmentEtl, '--out', $segmentPcap) | Out-Null
-            if ((Test-Path -LiteralPath $segmentPcap) -and (Get-Item -LiteralPath $segmentPcap).Length -gt 256) {
-                # Appending pcapng sections keeps every segment readable by TShark.
-                $bytes = [IO.File]::ReadAllBytes($segmentPcap)
-                $stream = [IO.File]::Open($pcap, 'Append', 'Write', 'ReadWrite')
-                try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+        Invoke-PacketMonitor @('etl2pcap', $etl, '--out', $pcap) | Out-Null
+    } else {
+        # PktMon buffers events until the trace stops, so a single long trace stays
+        # empty on disk until the very end. Rotate short traces instead: each stop
+        # flushes a finished segment, and the segments are concatenated into one
+        # pcapng (multi-section) so the live checklist can read real data.
+        $segmentSeconds = 12
+        $segment = 0
+        $first = $true
+        while ($true) {
+            $segment++
+            $segmentEtl = Join-Path $sessionPath ("segment_{0:d3}.etl" -f $segment)
+            Invoke-PacketMonitor @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '1024', '--file-name', $segmentEtl) | Out-Null
+            $started = $true
+            if ($first) {
+                $first = $false
+                if ($ReadyPath) {
+                    $readyData = @{ ready=$true; session=$sessionPath; pid=$PID } | ConvertTo-Json -Compress
+                    [IO.File]::WriteAllText($ReadyPath + '.tmp', $readyData, [Text.UTF8Encoding]::new($false))
+                    Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
+                }
+                Write-Host "抓包已开始。输出目录 $sessionPath"
+                $observer = Join-Path (Split-Path $PSScriptRoot -Parent) 'capture_checklist.py'
+                if ($Mode -eq 'Account' -and $StopFlag -and (Test-Path -LiteralPath $observer)) {
+                    $liveDir = Join-Path $sessionPath 'live-progress'
+                    New-Item -ItemType Directory -Path $liveDir -Force | Out-Null
+                    try {
+                        $arguments = '-B -X utf8 "' + $observer + '" watch --capture-root "' + $sessionPath + '"'
+                        $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
+                    } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
+                }
+                if ($Mode -eq 'Account') {
+                    Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
+                    Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
+                    Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
+                } else {
+                    Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
+                }
             }
+            $offset = 0
+            while ($offset -lt $segmentSeconds) {
+                if ($AutoStopSeconds -gt 0 -and ($segment - 1) * $segmentSeconds + $offset -ge $AutoStopSeconds) { break }
+                if ($StopFlag -and (Test-Path -LiteralPath $StopFlag)) { break }
+                Start-Sleep -Milliseconds 500
+                $offset += 0.5
+            }
+            Invoke-PacketMonitor @('stop') | Out-Null
+            $started = $false
+            if (Test-Path -LiteralPath $segmentEtl -PathType Leaf) {
+                $segmentPcap = Join-Path $sessionPath ("segment_{0:d3}.pcapng" -f $segment)
+                Invoke-PacketMonitor @('etl2pcap', $segmentEtl, '--out', $segmentPcap) | Out-Null
+                if ((Test-Path -LiteralPath $segmentPcap) -and (Get-Item -LiteralPath $segmentPcap).Length -gt 256) {
+                    # Appending pcapng sections keeps every segment readable by TShark.
+                    $bytes = [IO.File]::ReadAllBytes($segmentPcap)
+                    $stream = [IO.File]::Open($pcap, 'Append', 'Write', 'ReadWrite')
+                    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+                }
+            }
+            $done = $AutoStopSeconds -gt 0 -and ($segment * $segmentSeconds) -ge $AutoStopSeconds
+            $stopped = $StopFlag -and (Test-Path -LiteralPath $StopFlag)
+            if ($done -or $stopped) { break }
         }
-        $done = $AutoStopSeconds -gt 0 -and ($segment * $segmentSeconds) -ge $AutoStopSeconds
-        $stopped = $StopFlag -and (Test-Path -LiteralPath $StopFlag)
-        if ($done -or $stopped) { break }
     }
 } finally {
     if (Test-Path -LiteralPath $sessionPath) {

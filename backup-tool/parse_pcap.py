@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import struct
 import subprocess
@@ -35,7 +36,7 @@ from google.protobuf import json_format
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROTO_DIR = SCRIPT_DIR / "proto_gen"
-TSHARK = str(SCRIPT_DIR / "tools" / "tshark" / "tshark.exe")
+TSHARK = os.environ.get("OVERFIELD_TSHARK") or str(SCRIPT_DIR / "tools" / "tshark" / "tshark.exe")
 sys.path.insert(0, str(PROTO_DIR))
 sys.path.insert(0, str(SCRIPT_DIR))
 
