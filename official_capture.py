@@ -239,8 +239,10 @@ def result_from_export(export: Path, session: Path):
             raise ValueError("账号ZIP不能链接到输出目录之外。")
         from capture_zip import inspect_account_zip
         inspect_account_zip(account_zip)
+    incomplete_streams = summary.get("incomplete_streams")
     return {"session": str(session), "export": str(export),
-            "accountZip": str(account_zip) if account_zip else "", "playerUids": summary["player_uids"]}
+            "accountZip": str(account_zip) if account_zip else "", "playerUids": summary["player_uids"],
+            "incompleteStreams": len(incomplete_streams) if isinstance(incomplete_streams, list) else 0}
 
 
 def completed_result(session: Path):

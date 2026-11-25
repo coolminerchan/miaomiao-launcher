@@ -26,14 +26,20 @@ function Read-Host {
     if($Scenario -eq 'cli-error'){throw 'Simulated input failure'}
     return ''
 }
-function Start-Sleep { param([int]$Seconds,[int]$Milliseconds) $script:sleepCount++ }
+function Start-Sleep {
+    param([int]$Seconds,[int]$Milliseconds)
+    $script:sleepCount++
+    # Simulate 13.5 seconds of polling, beyond the old 12-second segment.
+    if($Scenario -eq 'gui-stop' -and $script:sleepCount -eq 27){
+        New-Item -ItemType File -Path $StopFlag -Force | Out-Null
+    }
+}
 function Invoke-PacketMonitor {
     param([string[]]$CommandArgs)
     $script:ops.Add(($CommandArgs -join '|'))
     if($CommandArgs[0] -eq 'start'){
         $file=$CommandArgs[[array]::IndexOf($CommandArgs,'--file-name')+1]
         [IO.File]::WriteAllBytes($file,[byte[]](1,2,3))
-        if($Scenario -eq 'gui-stop'){New-Item -ItemType File -Path $StopFlag -Force | Out-Null}
     }
     if($CommandArgs[0] -eq 'etl2pcap'){
         $file=$CommandArgs[[array]::IndexOf($CommandArgs,'--out')+1]
@@ -93,12 +99,16 @@ class CaptureModeTests(unittest.TestCase):
         self.assertEqual(data['sleepCount'],1)
         self.assertTrue(data['pcapExists'])
 
-    def test_gui_stop_flag_keeps_segmented_capture(self):
+    def test_gui_keeps_one_trace_until_stop_flag(self):
         data=self.check('gui-stop')
         self.assertEqual(data['readCount'],0)
+        self.assertEqual(data['sleepCount'],27)
         starts=[op for op in data['operations'] if op.startswith('start|')]
+        conversions=[op for op in data['operations'] if op.startswith('etl2pcap|')]
         self.assertEqual(len(starts),1)
-        self.assertTrue(starts[0].endswith('segment_001.etl'))
+        self.assertEqual(len(conversions),1)
+        self.assertTrue(starts[0].endswith('capture.etl'))
+        self.assertLess(data['operations'].index('stop'),data['operations'].index(conversions[0]))
         self.assertTrue(data['pcapExists'])
 
     def test_cli_input_failure_still_stops_owned_trace(self):

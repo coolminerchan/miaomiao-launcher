@@ -577,6 +577,13 @@ namespace OverFieldLocal
                     var captured = await Task.Run(() => backend.Official("stop"));
                     captureRunning = false;
                     await RefreshCaptureProgress();
+                    string captureWarning = captured.ContainsKey("incompleteStreams") && Convert.ToInt32(captured["incompleteStreams"]) > 0
+                        ? Loc.S("检测到抓包缺口或未解码数据，备份可能不完整。") : "";
+                    if (captureWarning.Length > 0)
+                    {
+                        Append(captureWarning);
+                        captureProgressHint.Text = captureWarning;
+                    }
                     string zip = captured.ContainsKey("accountZip") ? Convert.ToString(captured["accountZip"]) : "";
                     if (String.IsNullOrWhiteSpace(zip) || !System.IO.File.Exists(zip))
                     {
@@ -608,6 +615,7 @@ namespace OverFieldLocal
                         message = Loc.S("这个包的解码不完整（") + detail + Loc.S("）。\n导入后外观与装备可能为空，但账号、等级、角色会写入。\n\n仍要导入吗？");
                         Append(Loc.S("注意：包体解码不完整，装备与外观可能为空。"));
                     }
+                    if (captureWarning.Length > 0) message = captureWarning + "\n\n" + message;
                     if (MessageBox.Show(this, message, incomplete ? Loc.S("数据不完整，确认导入") : Loc.S("确认入库"), MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
                     if(!File.Exists(Path.Combine(backend.ProfilePath,"db","lolo.db")))
                         await Task.Run(() => backend.PrepareProfile());
@@ -783,14 +791,14 @@ namespace OverFieldLocal
                     string status=Convert.ToString(row["state"]);
                     var view=new ListViewItem(Loc.S(Convert.ToString(row["label"])));
                     view.SubItems.Add(Loc.S(Convert.ToString(row["status"])));view.SubItems.Add(Convert.ToString(row["count"]));view.SubItems.Add(Loc.S(Convert.ToString(row["hint"])));
-                    view.ForeColor=status=="collected"?Color.FromArgb(36,128,100):status=="missing"?Color.FromArgb(168,99,38):Theme.Muted;
+                    view.ForeColor=status=="collected"?Color.FromArgb(36,128,100):(status=="missing" || status=="partial")?Color.FromArgb(168,99,38):Theme.Muted;
                     captureChecklist.Items.Add(view);
                 }
                 string warning=data.ContainsKey("warning")?Convert.ToString(data["warning"]):"";
                 string stamp=data.ContainsKey("updatedAt")?Convert.ToString(data["updatedAt"]):"";
                 object live=data.ContainsKey("livePackets")?data["livePackets"]:null;
                 string packets=live!=null && Convert.ToInt64(live)>0 ? Loc.S(" · PktMon 已记录 ")+String.Format("{0:N0}",Convert.ToInt64(live))+Loc.S(" 个数据包") : "";
-                captureProgressHint.Text=(String.IsNullOrWhiteSpace(warning)?Loc.S("最近核对：")+stamp:warning)+packets;
+                captureProgressHint.Text=(String.IsNullOrWhiteSpace(warning)?Loc.S("最近核对：")+stamp:Loc.S(warning))+packets;
             } finally { captureChecklist.EndUpdate(); }
         }
         async Task<bool> SaveCaptureZip(string zip)

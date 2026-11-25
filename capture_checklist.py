@@ -38,7 +38,7 @@ GROUPS = [
     ('archive','档案与生活技能',['GetArchiveInfoRsp','GetLifeInfoRsp'],'打开档案、生活技能界面'),
 ]
 RELEVANT = {n for _,_,targets,_ in GROUPS for n in targets if not n.startswith('@')} | {'PackNotice','GetAllCharacterEquipRsp','SceneDataNotice'}
-STATES = {'collected':'已采集','empty':'已收到（列表为空）','waiting':'尚未采集','missing':'未采集到','unknown':'暂时无法判断'}
+STATES = {'collected':'已采集','partial':'未见装备列表','empty':'已收到（列表为空）','waiting':'尚未采集','missing':'未采集到','unknown':'暂时无法判断'}
 
 
 def atomic_json(path, data):
@@ -85,7 +85,10 @@ def report(counts=None, empty=None, *, phase='idle', readable=False, warning='',
         evidence={n:int(counts.get(n,0)) for n in targets if counts.get(n,0)>0}
         count=sum(evidence.values())
         if count:
-            state='empty' if all(empty.get(n,0)>=v for n,v in evidence.items()) else 'collected'
+            if key in ('weapon', 'armor', 'poster') and set(evidence) == {'@' + key}:
+                state = 'partial'
+            else:
+                state='empty' if all(empty.get(n,0)>=v for n,v in evidence.items()) else 'collected'
         else:state='missing' if final and readable else 'waiting' if readable else 'unknown'
         items.append({'id':key,'label':label,'state':state,'status':STATES[state],
                       'count':count,'evidence':evidence,'hint':hint})
@@ -103,14 +106,19 @@ def final_report(export):
         if not match or match.group(1) not in RELEVANT:continue
         try:observe(match.group(1),json.loads(path.read_text(encoding='utf-8-sig')),counts,empty)
         except (ValueError,TypeError,OSError):continue
-    warning=''
-    summary=export/'summary.json'
+    warnings = []
+    summary = export / 'summary.json'
     if summary.is_file():
         try:
-            if len(json.loads(summary.read_text(encoding='utf-8-sig')).get('player_uids',[]))>1:
-                warning='本次流量包含多个账号，清单仅表示本次见过这些响应；不能作为单账号完整备份，请按账号分别采集。'
-        except (OSError,ValueError,TypeError):pass
-    return report(counts,empty,phase='complete',readable=True,warning=warning)
+            metadata = json.loads(summary.read_text(encoding='utf-8-sig'))
+            if isinstance(metadata, dict):
+                if len(metadata.get('player_uids', [])) > 1:
+                    warnings.append('本次流量包含多个账号，清单仅表示本次见过这些响应；不能作为单账号完整备份，请按账号分别采集。')
+                if metadata.get('incomplete_streams'):
+                    warnings.append('检测到抓包缺口或未解码数据，备份可能不完整。')
+        except (OSError, ValueError, TypeError):
+            pass
+    return report(counts, empty, phase='complete', readable=True, warning=' '.join(warnings))
 
 
 def load_decoder(tool):
@@ -159,15 +167,14 @@ def read_packet_counters():
     """Total packets seen by the running PktMon session, or None if unavailable."""
     pktmon = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/PktMon.exe'
     try:
-        process = subprocess.Popen([str(pktmon), 'counters'], stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL,
-                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-        raw, _ = process.communicate(timeout=8)
+        result = subprocess.run([str(pktmon), 'counters'], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=8,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     except (OSError, subprocess.SubprocessError):
         return None
-    if process.returncode:
+    if result.returncode:
         return None
-    text = raw.decode('utf-8', errors='replace')
+    text = result.stdout.decode('utf-8', errors='replace')
     total = 0
     for line in text.splitlines():
         fields = [part.strip() for part in line.split('|')]
@@ -183,8 +190,10 @@ def read_packet_counters():
     return total or None
 
 
-def snapshot_pcap(decoder, etl, live):
-    """Convert a copy of the live ETL; return (state, pcap). Never touches the session."""
+def snapshot_pcap(decoder, etl, live, stop):
+    """Scan a copy of the live ETL without stopping the capture or keeping the copy."""
+    if stop.is_file():
+        return None
     with tempfile.TemporaryDirectory(prefix='snapshot-', dir=live) as temporary:
         copied = Path(temporary) / 'capture.etl'
         pcap = copied.with_suffix('.pcapng')
@@ -193,46 +202,52 @@ def snapshot_pcap(decoder, etl, live):
         result = subprocess.run([str(pktmon), 'etl2pcap', str(copied), '--out', str(pcap)],
                                 capture_output=True, timeout=20,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-        if result.returncode or not pcap.is_file():
-            return 'unreadable', None
-        if pcap.stat().st_size <= 256:
-            return 'buffered', None
-        if not decoder.list_tcp_streams(pcap):
-            return 'buffered', None
-        return 'readable', pcap
+        if result.returncode or not pcap.is_file() or pcap.stat().st_size <= 256 or stop.is_file():
+            return None
+        counts, empty, _ = scan_pcap(decoder, pcap, stop)
+        return (counts, empty) if counts else None
 
 
 def watch(capture_root):
-    """Read finished segments only. Each segment is flushed when its trace stops."""
-    root = Path(capture_root).resolve(); live = root / 'live-progress'; live.mkdir(exist_ok=True)
-    stop = root / 'live-progress-stop.flag'; target = live / 'progress.json'
-    counts = Counter(); empty = Counter(); readable = False
-    scanned = set(); notice = '正在等待第一个落盘分段。'
+    """Poll counters and check any data that has already reached the continuous ETL."""
+    root = Path(capture_root).resolve()
+    live = root / 'live-progress'
+    live.mkdir(exist_ok=True)
+    etl = root / 'capture.etl'
+    stop = root / 'live-progress-stop.flag'
+    target = live / 'progress.json'
+    counts = Counter()
+    empty = Counter()
+    readable = False
+    last_signature = None
+    next_snapshot = 0.0
+    progress_hint = '采集期间仅核对已落盘的数据，结束采集后进行最终核对。'
+    unavailable_hint = '实时快照暂不可读，结束采集后进行最终核对。'
+    notice = progress_hint
     atomic_json(target, report(phase='capturing', warning=notice))
     decoder = load_decoder(BASE / 'backup-tool')
     deadline = time.monotonic() + 4 * 3600
     while not stop.is_file() and time.monotonic() < deadline:
         live_packets = read_packet_counters()
-        try:
-            segments = sorted(root.glob('segment_*.pcapng'))
-            fresh = [p for p in segments if p.name not in scanned and p.stat().st_size > 256]
-            for path in fresh:
-                found, zero, streams = scan_pcap(decoder, path, stop)
-                scanned.add(path.name)
-                if streams:
-                    readable = True
-                    for key, value in found.items():
-                        counts[key] += value
-                        empty[key] += zero[key]
-            if readable:
-                notice = ''
-            elif fresh:
-                notice = '分段已落盘，但其中没有识别到游戏协议包；请确认登录后进入了场景。'
-            elif live_packets:
-                notice = ('PktMon 已记录 ' + format(live_packets, ',') + ' 个数据包；'
-                          '当前分段仍在缓冲，约十多秒后写入磁盘即可核对。')
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            notice = '分段读取暂时失败，稍后自动重试；原始数据不受影响。'
+        now = time.monotonic()
+        if now >= next_snapshot:
+            try:
+                info = etl.stat()
+                signature = (info.st_size, info.st_mtime_ns)
+                if info.st_size > 0 and signature != last_signature:
+                    last_signature = signature
+                    next_snapshot = now + 10.0
+                    snapshot = snapshot_pcap(decoder, etl, live, stop)
+                    if snapshot is None:
+                        notice = unavailable_hint
+                    else:
+                        counts, empty = snapshot
+                        readable = True
+                        notice = progress_hint
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                notice = unavailable_hint
         if stop.is_file():
             break
         atomic_json(target, report(counts, empty, phase='capturing', readable=readable,

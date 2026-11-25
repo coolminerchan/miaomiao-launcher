@@ -44,6 +44,7 @@ import net_pb2  # type: ignore  # noqa: E402
 from pcap_compat import prepare_capture  # noqa: E402
 
 HEADER_STRUCT = struct.Struct(">H")
+TCP_GAP_MARKER = re.compile(rb"\[[0-9]+ bytes missing in capture file\]\x00?")
 GAME_PORTS = {"11001", "11002", "11003", "11004", "21001", "21002"}
 LOGIN_REQUEST_IDS = {1001, 1003, 2201}
 SCENE_DATA_NOTICE_ID = 1016
@@ -128,9 +129,14 @@ def list_tcp_streams(pcap_path: Path) -> List[int]:
 
 def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str, str, bytes, bytes]:
     """
-    通过 tshark -z follow,tcp,raw,<id> 精确提取重组后的双向字节流。
+    提取重组后的双向字节流，每个方向只保留首个缺口之前的内容。
     返回 (node0_addr, node1_addr, node0_to_node1_bytes, node1_to_node0_bytes)。
     """
+    node0, node1, b01, b10, _ = _follow_tcp_stream(pcap_path, stream_id)
+    return node0, node1, b01, b10
+
+
+def _follow_tcp_stream(pcap_path: Path, stream_id: int) -> Tuple[str, str, bytes, bytes, set[int]]:
     cmd = [TSHARK, "-n", "-r", str(pcap_path), "-q", "-z", f"follow,tcp,raw,{stream_id}"]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if res.returncode != 0:
@@ -138,8 +144,8 @@ def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str,
 
     node0 = ""
     node1 = ""
-    dir0_chunks: List[bytes] = []
-    dir1_chunks: List[bytes] = []
+    chunks: Tuple[List[bytes], List[bytes]] = ([], [])
+    gap_directions: set[int] = set()
 
     in_body = False
     for raw_line in res.stdout.splitlines():
@@ -158,17 +164,21 @@ def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str,
         if not line:
             continue
         # tshark follow,tcp,raw 约定：无前导制表符为 Node0 -> Node1，带前导 '\t' 为 Node1 -> Node0
-        is_from_node1 = line.startswith("\t")
+        direction = int(line.startswith("\t"))
+        if direction in gap_directions:
+            continue
         hex_str = line.strip()
         if not re.fullmatch(r"[0-9a-fA-F]+", hex_str) or len(hex_str) % 2 != 0:
             continue
         chunk = bytes.fromhex(hex_str)
-        if is_from_node1:
-            dir1_chunks.append(chunk)
-        else:
-            dir0_chunks.append(chunk)
+        # TShark emits a missing-segment marker as a separate hex-encoded line.
+        # Later bytes cannot establish a new game frame boundary safely.
+        if TCP_GAP_MARKER.fullmatch(chunk):
+            gap_directions.add(direction)
+            continue
+        chunks[direction].append(chunk)
 
-    return node0, node1, b"".join(dir0_chunks), b"".join(dir1_chunks)
+    return node0, node1, b"".join(chunks[0]), b"".join(chunks[1]), gap_directions
 
 
 def parse_game_stream(data: bytes) -> Tuple[List[dict], int]:
@@ -359,13 +369,14 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     observed_player_uids: set[int] = set()
     player_highlights: dict = {}
     stream_summaries: List[dict] = []
+    incomplete_streams: List[dict] = []
     garden_layouts: dict[int, net_pb2.SceneGardenData] = {}
     player_names: dict[int, str] = {}
     garden_packets: dict[int, list[str]] = defaultdict(list)
 
     for sid in streams:
-        node0, node1, b01, b10 = extract_tcp_stream_directions(pcap_path, sid)
-        if not b01 and not b10:
+        node0, node1, b01, b10, gap_directions = _follow_tcp_stream(pcap_path, sid)
+        if not b01 and not b10 and not gap_directions:
             continue
 
         # 判断哪个方向是 s2c（通常服务端端口是 11003 / 21001 等，或非内网 IP）
@@ -383,10 +394,21 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
             directions = pick_directions(b01, b10)
 
         stream_pkt_total = 0
-        for dir_label, payload in directions:
-            if not payload:
-                continue
-            pkts, _ = parse_game_stream(payload)
+        known_game_port = p0 in GAME_PORTS or p1 in GAME_PORTS
+        recognized_game_stream = known_game_port
+        stream_issues = []
+        for index, (dir_label, payload) in enumerate(directions):
+            pkts, trailing_bytes = parse_game_stream(payload)
+            recognized_direction = known_game_port or bool(pkts) or looks_like_game_stream(payload)
+            recognized_game_stream = recognized_game_stream or recognized_direction
+            tcp_gap = index in gap_directions
+            if tcp_gap or (trailing_bytes and recognized_direction):
+                stream_issues.append({
+                    "stream_id": sid,
+                    "direction": dir_label,
+                    "tcp_gap": tcp_gap,
+                    "trailing_bytes": trailing_bytes,
+                })
             if not pkts:
                 continue
             stream_pkt_total += len(pkts)
@@ -468,6 +490,8 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
                 else:
                     decode_errors.append({"seq": global_seq, "msg_id": msg_id, "msg": msg_name, "err": err})
 
+        if recognized_game_stream:
+            incomplete_streams.extend(stream_issues)
         if stream_pkt_total > 0:
             stream_summaries.append(
                 {"stream_id": sid, "node0": node0, "node1": node1, "packets": stream_pkt_total}
@@ -484,6 +508,7 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         "pcap_file": str(pcap_path),
         "total_packets": global_seq,
         "game_streams": stream_summaries,
+        "incomplete_streams": incomplete_streams,
         "player_uids": player_uids,
         "player_highlights": player_highlights if len(player_uids) <= 1 else {},
         "message_counts": dict(msg_names_seen.most_common()),
@@ -509,6 +534,8 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     print(f"解包完成！共解析出 {global_seq} 个游戏协议包")
     print(f"输出目录: {out_dir}")
     print("=" * 60)
+    if incomplete_streams:
+        print(f"\n[注意] {len(incomplete_streams)} 个游戏流方向有 TCP 缺口或未解析的末尾字节，详情见 summary.json。")
 
     if len(player_uids) > 1:
         uid_list = "、".join(str(uid) for uid in player_uids)
