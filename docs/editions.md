@@ -19,9 +19,9 @@
 
 Two local worlds have separate database paths, process records, controller locks, and ports. Keep the two portable packages in separate folders. Their local worlds can run concurrently. LAN mode still uses the existing dedicated host mode; do not publish two LAN host instances on the same default host ports.
 
-验证结果：两份 EXE 编译成功；既有回归 113 项及新增隔离测试 3 项通过；两套真实空账号服务并行端口就绪；Steam 私服副本适配器在实机返回 `adapter-ready`，测试后自动关闭。
+v1.2.1 验证结果：两份 EXE 编译成功；135 项自动回归通过，12 组常规/最小窗口布局通过；两套真实空账号服务并行端口就绪；Steam 私服副本适配器再次返回 `adapter-ready`，测试后自动关闭。
 
-Verification scope: server concurrency and adapter installation. Full in-world login, international resource compatibility, and outfit rendering have not yet been verified. Do not interpret adapter readiness as proof that the previously reported outfit issue is fixed.
+The user confirmed the international edition working before v1.2.0 became stable. For v1.2.1, automated regression, UI layout, real parallel server startup and Steam adapter installation were repeated. This is not a claim that every gameplay feature or future client build is supported.
 
 公服采集仍独立于私服目录：按原版客户端流程采集，保存账号 ZIP；不要公开个人存档或账号包。
 

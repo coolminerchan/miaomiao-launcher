@@ -4,7 +4,15 @@ Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、�
 
 ## 当前更新状态（2026-11-25）
 
-**当前发布版本为 `v1.1.5`，附件已包含工具 1.0.9 与采集项目清单。**
+**当前发布版本为 `v1.2.1`，提供中文国服、英文 Steam 国际服两份独立便携启动器。**
+
+- [中文国服便携包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.2.1/OverFieldLauncher-CN-portable.zip)
+- [英文国际服便携包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.2.1/OverFieldLauncher-EN-portable.zip)
+- 整合并改进 coolminerchan 的 PR #2：混合 Wi-Fi/隧道抓包采用低内存流式修正，保留接口时间戳参数，恢复独立脚本按回车结束。
+- 135 项自动回归、12 组两版窗口布局检查通过；国服/国际服服务可并行，国际服可用已由用户实机确认。
+- 两份包请分别解压到不同目录。游戏本体不包含在包内，不自动下载。
+
+详细说明见 [两版使用说明](docs/editions.md) 和 [更新记录](RELEASE-NOTES.md)。以下功能说明包含历史修复。
 
 - **支持 Steam 版公服客户端**：可直接选择 Steam 游戏快捷方式（`.url`，指向 `steam://rungameid/...`）。这类客户端不在配置里固定游戏端口，因此改为按服务器地址采集，并按实际能解析出游戏协议的方向判定收发。
 - **修复 VPN / 隧道网卡抓包为空**：隧道网卡把裸 IP 包记成以太网帧，导致 TShark 读不到 TCP、解包结果为 0。现已识别并修正链路类型，保留原始抓包并另存修正副本。

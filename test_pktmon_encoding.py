@@ -18,13 +18,13 @@ class FakePktMon {
   if(op=="status"){
    if(mode=="idle-cn")Console.Write("数据包监视器没有运行。\r\r\n");
    else if(mode=="idle-en")Console.Write("Packet Monitor is not running.\r\n");
-   else if(mode=="busy-owned")Console.Write("正在运行\r\n日志文件: "+Environment.GetEnvironmentVariable("FAKE_ETL")+"\r\n");
+   else if(mode=="busy-owned" || mode=="busy-segment" || mode=="busy-missing-etl")Console.Write("正在运行\r\n日志文件: "+Environment.GetEnvironmentVariable("FAKE_ETL")+"\r\n");
    else if(mode=="busy-other")Console.Write("正在运行\r\n日志文件: C:\\OtherDiagnostic\\capture.etl\r\n");
    else Console.Write("unrecognized monitor state");
    return 0;
   }
   if(op=="filter list"){
-   if(mode=="busy-owned")Console.Write("1 OFBackup_11001 TCP 11001\r\n");
+   if(mode=="busy-owned" || mode=="busy-segment" || mode=="busy-missing-etl")Console.Write("1 OFBackup_11001 TCP 11001\r\n");
    else if(mode=="busy-other")Console.Write("1 OtherDiagnostic TCP 11001\r\n");
    else Console.Write(mode=="idle-en"?"none":"无");return 0;
   }
@@ -46,7 +46,7 @@ if($Mode -eq 'quoted-args'){
  $path='C:\目录 with spaces\'; $tail='ends with slash\'
  $actual=Invoke-PacketMonitor @('echoargs',$path,$tail)
  if($actual -ne ($path+'|'+$tail)){throw 'Native argument quoting corrupted'}
-}elseif($Mode -in @('idle-cn','idle-en','busy-owned')){
+}elseif($Mode -in @('idle-cn','idle-en','busy-owned','busy-segment','busy-missing-etl')){
  Clear-PreviousBackupCapture
 }elseif($Mode -eq 'native-error'){
  $blocked=$false
@@ -74,9 +74,9 @@ class PktMonEncodingTests(unittest.TestCase):
         cls.etl=cls.root/'account_20200101_120000_001/capture.etl';cls.etl.parent.mkdir();cls.etl.write_bytes(b'fixture')
     @classmethod
     def tearDownClass(cls):cls.tmp.cleanup()
-    def check(self,mode,expected_operations):
+    def check(self,mode,expected_operations,etl_override=None):
         log=self.root/(mode+'.ops')
-        env={**os.environ,'FAKE_PKTMON_MODE':mode,'FAKE_OPERATION_LOG':str(log),'FAKE_ETL':str(self.etl)}
+        env={**os.environ,'FAKE_PKTMON_MODE':mode,'FAKE_OPERATION_LOG':str(log),'FAKE_ETL':str(etl_override or self.etl)}
         r=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(self.harness),
                           '-CaptureScript',str(ROOT/'backup-tool/capture.ps1'),'-Fixture',str(self.exe),'-Mode',mode],
                          capture_output=True,env=env,timeout=30)
@@ -86,6 +86,10 @@ class PktMonEncodingTests(unittest.TestCase):
     def test_chinese_idle_not_misclassified_as_busy(self):self.check('idle-cn',[])
     def test_english_idle_not_misclassified_as_busy(self):self.check('idle-en',[])
     def test_only_owned_backup_session_is_stopped(self):self.check('busy-owned',['stop','filter remove'])
+    def test_owned_segment_session_is_stopped(self):
+        self.check('busy-segment',['stop','filter remove'],self.etl.with_name('segment_001.etl'))
+    def test_owned_session_stopped_even_if_etl_deleted(self):
+        self.check('busy-missing-etl',['stop','filter remove'],self.root/'account_20200101_120000_002/capture.etl')
     def test_foreign_session_is_never_stopped(self):self.check('busy-other',[])
     def test_ambiguous_state_is_never_stopped(self):self.check('ambiguous',[])
     def test_native_utf8_error_is_readable(self):self.check('native-error',[])

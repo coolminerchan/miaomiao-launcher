@@ -61,6 +61,9 @@ namespace OverFieldLocal
             var textControls=new List<Control>();
             foreach(Control child in parent.Controls)
             {
+                // Hidden pages have not been laid out; inspect them separately
+                // while visible, rather than reporting phantom clipping errors.
+                if(!child.Visible) continue;
                 if(child is ActionButton)
                 {
                     Size text=TextRenderer.MeasureText(child.Text,child.Font,new Size(10000,1000),TextFormatFlags.SingleLine|TextFormatFlags.NoPadding);

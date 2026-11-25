@@ -1,4 +1,4 @@
-﻿// English string table. The Chinese build returns the original text; the
+// English string table. The Chinese build returns the original text; the
 // English build returns the translation for the same key.
 using System.Collections.Generic;
 
@@ -85,7 +85,7 @@ namespace OverFieldLocal
             { "。可私下交给可信服主，入库为可选操作。", ". Hand it privately to a trusted host; importing is optional." },
             { "。采集时将通过 Steam 启动，需先登录 Steam。", ". Capture starts it through Steam, so sign in to Steam first." },
             { "人数上限", "Capacity" },
-            { "仅启动服务", "Services only" },
+            { "仅启动服务", "Services" },
             { "仅本机连接 · 独立单机存档", "This PC only · isolated solo save" },
             { "仅本机连接\n独立数据与存档", "This PC only\nIsolated data and saves" },
             { "代理设置未接入", "Proxy not attached" },
@@ -123,7 +123,7 @@ namespace OverFieldLocal
             { "名称", "Name" },
             { "启动单机游戏  →", "Start solo game  →" },
             { "启动器已就绪，正在读取本地服务状态。", "Launcher ready; reading local service status." },
-            { "启动服务", "Start services" },
+            { "启动服务", "Start" },
             { "启动游戏  →", "Start game  →" },
             { "启动设置", "Launch settings" },
             { "响应", "Responses" },
@@ -133,14 +133,14 @@ namespace OverFieldLocal
             { "地址", "Address" },
             { "场景", "Scene" },
             { "场景（0 为默认）", "Scene (0 is the default)" },
-            { "备份存档", "Back up save" },
+            { "备份存档", "Backup" },
             { "备份已保存：", "Backup saved: " },
             { "好友列表", "Friends" },
             { "官方客户端采集账号数据", "Capture account data from the official client" },
             { "宠物列表", "Pets" },
             { "家园与家具", "Garden and furniture" },
             { "导入报告位于数据目录 accounts\\", "The import report is under the data folder, accounts\\" },
-            { "导入数据", "Import data" },
+            { "导入数据", "Import" },
             { "导入未完成：", "Import did not finish: " },
             { "尚未启动 · 独立服务", "Not started · isolated service" },
             { "局域网", "LAN" },
@@ -169,7 +169,7 @@ namespace OverFieldLocal
             { "当前模式的服务已停止，原网络路线已恢复。", "This mode's services stopped and the previous network route was restored." },
             { "成就", "Achievements" },
             { "房间", "Room" },
-            { "房间与玩家", "Rooms and players" },
+            { "房间与玩家", "Rooms" },
             { "房间与玩家    ·    ", "Rooms and players    ·    " },
             { "房间名称", "Room name" },
             { "所选目录缺少服务端：", "The selected folder has no server: " },
@@ -186,7 +186,7 @@ namespace OverFieldLocal
             { "操作未完成：", "Operation unfinished: " },
             { "操作超时，已停止等待。请检查状态后重试。", "The operation timed out and is no longer being waited on. Check the status and retry." },
             { "数据不完整，确认导入", "Import anyway" },
-            { "数据目录", "Data folder" },
+            { "数据目录", "Data" },
             { "文件已保存，但无法打开所在位置：", "The file was saved, but its folder could not be opened: " },
             { "断开玩家", "Disconnect player" },
             { "新房间", "New room" },

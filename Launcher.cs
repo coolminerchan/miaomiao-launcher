@@ -14,10 +14,15 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.2.0-preview")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.2.1")]
+#if ENGLISH
+[assembly: System.Reflection.AssemblyTitle("OverField International Launcher")]
+[assembly: System.Reflection.AssemblyProduct("OverField International Launcher")]
+#else
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
+#endif
 
 namespace OverFieldLocal
 {
