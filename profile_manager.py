@@ -12,7 +12,20 @@ import re
 import subprocess
 from contextlib import closing
 
-MODES = {'solo': (18080, 18100, 18200), 'host': (19080, 19100, 19200)}
+MODES = {'solo': (18080, 18100, 18200), 'host': (19080, 19100, 19200), 'steam': (20080, 20100, 20200)}
+
+# Each profile owns a disjoint port block, so the national and the international
+# worlds can run side by side on one machine without negotiating a free port.
+# The room gateway admin port sits 220 above the HTTP port (18300/19300/20300).
+
+# Client language enum values must be verified against the actual client.
+# A voice-language enum is not evidence for the UI-language numbering.
+# Launcher UI language is selected at build time, independently of this setting.
+LANGUAGE_DEFAULT = {}
+
+# Channels whose client assets differ; the Steam build keeps its own copy so the
+# two editions never share a writable install.
+CHANNEL_SOURCES = {'steam': 'steam'}
 
 
 def lan_ip(value):
@@ -71,9 +84,31 @@ def locate(roots):
     return client, server
 
 
+def apply_language(resources, language):
+    """Pin the client UI language inside this profile's own resource copy.
+
+    The value lives in InitConfigAsset.json. Rewriting only this profile's file
+    keeps the shipped server-kit template untouched, so one installation can run
+    a Chinese and an English world at the same time.
+    """
+    path = Path(resources) / 'Config' / 'InitConfigAsset.json'
+    if not path.is_file():
+        return None
+    document = json.loads(path.read_text(encoding='utf-8-sig'))
+    changed = 0
+    for section in document.values():
+        if isinstance(section, dict) and 'ForeceLaguageType' in section:
+            if section['ForeceLaguageType'] != language:
+                section['ForeceLaguageType'] = language
+                changed += 1
+    if changed:
+        write_json(path, document)
+    return {'path': str(path), 'language': language, 'sections': changed}
+
+
 def prepare(root, base, mode, host):
     http, gate, log = MODES[mode]
-    address = '127.0.0.1' if mode == 'solo' else lan_ip(host)
+    address = lan_ip(host) if mode == 'host' else '127.0.0.1'
     profile = base / mode
     profile.mkdir(parents=True, exist_ok=True)
     (profile / 'logs').mkdir(exist_ok=True)
@@ -90,6 +125,9 @@ def prepare(root, base, mode, host):
     resources = profile / 'Resource'
     if not resources.exists():
         shutil.copytree(server / 'Resource', resources)
+    language = LANGUAGE_DEFAULT.get(mode)
+    if language is not None:
+        result['language'] = apply_language(resources, language)
     executable = profile / 'server/Lolo.exe'
     executable.parent.mkdir(exist_ok=True)
     if not executable.exists(): shutil.copy2(server / 'Lolo.exe', executable)
@@ -234,8 +272,13 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--before', type=Path)
     parser.add_argument('--proxy-port', type=int, default=18890)
+    # Explicit language wins over the per-mode default, so a user can run an
+    # English world on either channel.
+    parser.add_argument('--language', type=int, choices=[1, 2, 3, 4, 5])
     args = parser.parse_args()
     if args.action == 'prepare':
+        if args.language is not None:
+            LANGUAGE_DEFAULT[args.mode] = args.language
         result = prepare(args.root, args.base, args.mode, args.host)
     elif args.action == 'client':
         result = prepare_client(args.root,args.base,args.mode)

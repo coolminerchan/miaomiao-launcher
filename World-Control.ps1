@@ -1,9 +1,9 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet('Start','Stop','Status','Backup','Cleanup')][string]$Action = 'Status',
     [switch]$OrphansOnly,
     [string]$GameRoot = '',
-    [ValidateSet('solo','host')][string]$Mode = 'solo',
+    [ValidateSet('solo','host','steam')][string]$Mode = 'solo',
     [uint32]$Uid = 1000000,
     [string]$HostAddress = '127.0.0.1',
     [int]$ProxyPort = 18890,
@@ -14,7 +14,10 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 if([string]::IsNullOrWhiteSpace($GameRoot)) { $GameRoot=$PSScriptRoot }
 $taskBase = Join-Path $PSScriptRoot 'profiles'
-$taskStateFile = Join-Path $PSScriptRoot 'runtime\world-state.json'
+$taskStateFile = Join-Path $PSScriptRoot "runtime\world-state-$Mode.json"
+# Older builds kept a single shared state file. Read it once so an upgrade keeps
+# stopping what the previous launcher started.
+$taskLegacyStateFile = Join-Path $PSScriptRoot 'runtime\world-state.json'
 $taskRegistry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 $taskProfile = Join-Path $taskBase $Mode
 $taskExecutable = Join-Path $taskProfile 'server\Lolo.exe'
@@ -34,16 +37,27 @@ function Find-Client([string]$Base) {
     return $null
 }
 $taskOriginalClient = Find-Client $GameRoot
-$taskTarget = if ($Mode -eq 'solo') { '127.0.0.1' } else { $HostAddress }
-$taskHttp = if ($Mode -eq 'solo') { 18080 } else { 19080 }
-$taskGateway = if ($Mode -eq 'solo') { 18100 } else { 19100 }
-$taskLogPort = if ($Mode -eq 'solo') { 18200 } else { 19200 }
-$taskAdminPort = if ($Mode -eq 'solo') { 18300 } else { 19300 }
+$taskTarget = if ($Mode -eq 'host') { $HostAddress } else { '127.0.0.1' }
+# One disjoint port block per mode: the national and the Steam world can run at
+# the same time, each with its own server, gateway and admin port.
+$taskHttp = switch ($Mode) { 'solo' { 18080 } 'host' { 19080 } 'steam' { 20080 } }
+$taskGateway = switch ($Mode) { 'solo' { 18100 } 'host' { 19100 } 'steam' { 20100 } }
+$taskLogPort = switch ($Mode) { 'solo' { 18200 } 'host' { 19200 } 'steam' { 20200 } }
+$taskAdminPort = switch ($Mode) { 'solo' { 18300 } 'host' { 19300 } 'steam' { 20300 } }
 
 function Read-State {
-    if (Test-Path -LiteralPath $taskStateFile) {
-        $taskRead=Get-Content -LiteralPath $taskStateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Each mode keeps its own record so starting the Steam world never hides the
+    # national world's processes. Fall back to the old shared file once.
+    $taskFile = $taskStateFile
+    if (-not (Test-Path -LiteralPath $taskFile) -and (Test-Path -LiteralPath $taskLegacyStateFile)) {
+        $taskFile = $taskLegacyStateFile
+    }
+    if (Test-Path -LiteralPath $taskFile) {
+        $taskRead=Get-Content -LiteralPath $taskFile -Raw -Encoding UTF8 | ConvertFrom-Json
         if (-not $taskRead.PSObject.Properties['Gateway']) { $taskRead | Add-Member -NotePropertyName Gateway -NotePropertyValue $null }
+        if (-not $taskRead.PSObject.Properties['Mode']) { $taskRead | Add-Member -NotePropertyName Mode -NotePropertyValue 'solo' }
+        # A legacy state belonging to another mode must never be adopted or stopped.
+        if ($taskRead.Mode -ne $Mode) { return $null }
         return $taskRead
     }
     return $null
@@ -161,7 +175,7 @@ function Wait-Ready([string]$Address,[int]$Port,$Record) {
     throw "Profile port $Port did not become ready."
 }
 function Client-Running {
-    return @(Get-Process -Name 'launcher' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $taskOriginalClient -or ($_.Path -and $_.Path.StartsWith($taskBase+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) }).Count -gt 0
+    return @(Get-Process -Name 'launcher' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and [string]::Equals($_.Path,$taskClient,[StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
 }
 function Stop-Orphans {
     # Helper processes this build spawns outlive their parent if the launcher is
@@ -295,7 +309,7 @@ function Invoke-World {
 }
 
 $taskExitCode=0
-$taskLock=[Threading.Mutex]::new($false,'Local\OverFieldWorldControl')
+$taskLock=[Threading.Mutex]::new($false,"Local\OverFieldWorldControl-$Mode")
 $taskLockHeld=$false
 try {
     if ($Action -ne 'Status') {

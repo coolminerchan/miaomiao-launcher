@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 ALLOWED = {
-    'Launcher.cs', 'SeasideUI.cs', 'RoomManagerForm.cs', 'launcher.manifest', 'launcher.ico',
+    'Launcher.cs', 'SeasideUI.cs', 'RoomManagerForm.cs', 'Strings.cs', 'test_editions.py', 'docs/editions.md', 'launcher.manifest', 'launcher.ico',
     'build_launcher.ps1', 'LocalUidSDK.cpp', 'sdk.def', 'build_sdk.cmd',
     'World-Control.ps1', 'Lan-Firewall.ps1', 'profile_manager.py',
     'capture_import.py', 'room_gateway.py', 'proto_fields.json',
@@ -34,7 +34,7 @@ ALLOWED = {
     'backup-tool/proto_gen/Lolo-LICENSE.txt',
     'backup-tool/proto_gen/of-ps-LICENSE.txt',
 }
-GENERATED = {'OverFieldLauncher.exe', 'LocalUidSDK.dll', 'LocalUidSDK.obj',
+GENERATED = {'OverFieldLauncher.exe', 'OverFieldLauncher-EN.exe', 'LocalUidSDK.dll', 'LocalUidSDK.obj',
              'LocalUidSDK.lib', 'LocalUidSDK.exp'}
 PATTERNS = [
     re.compile(r'[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"\']+', re.I),

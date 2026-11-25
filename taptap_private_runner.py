@@ -13,6 +13,14 @@ from pathlib import Path
 
 SUPPORTED_GAME_ASSEMBLY = '2db98364241c95864781f77877523b9d2f728b22a91935fa30cdfb33a8b7f4ea'
 
+# The Steam build ships the same QuickSDK types the adapter hooks, so it can run
+# against a local world too. Each supported build is pinned by its own hash; an
+# unknown binary still fails closed instead of being instrumented blindly.
+SUPPORTED_BUILDS = {
+    SUPPORTED_GAME_ASSEMBLY: 'quicksdk-pc',
+    '4787fc3abaf911890fd6bccae6d0f85904f7c959a5d14c55f5dc56b75fe82cab': 'steam',
+}
+
 
 def validated_config(client, host, port, uid):
     from client_identity import classify
@@ -28,7 +36,7 @@ def validated_config(client, host, port, uid):
     if not 1 <= int(port) <= 65535 or not 1 <= int(uid) <= 0xffffffff:
         raise ValueError('Invalid local port or UID.')
     digest = hashlib.sha256((client/'GameAssembly.dll').read_bytes()).hexdigest()
-    if digest != SUPPORTED_GAME_ASSEMBLY:
+    if digest not in SUPPORTED_BUILDS:
         raise ValueError('Unverified GameAssembly version; refuse to apply this experimental adapter.')
     return {'host':str(address),'port':int(port),'uid':int(uid)}
 
