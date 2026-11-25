@@ -1,3 +1,4 @@
+param([ValidateSet('Both','CN','EN')][string]$Edition='Both')
 $ErrorActionPreference = 'Stop'
 
 # Two editions share one code base. The Chinese launcher defaults to the national
@@ -28,5 +29,5 @@ function Build-Edition([string]$Name, [string[]]$Defines, [string]$Output) {
     Write-Host ("{0} -> {1}" -f $Name, (Split-Path -Leaf $Output))
 }
 
-Build-Edition 'national (zh-CN)' @() (Join-Path $PSScriptRoot 'OverFieldLauncher.exe')
-Build-Edition 'international (en)' @('ENGLISH') (Join-Path $PSScriptRoot 'OverFieldLauncher-EN.exe')
+if($Edition -in @('Both','CN')) { Build-Edition 'national (zh-CN)' @() (Join-Path $PSScriptRoot 'OverFieldLauncher.exe') }
+if($Edition -in @('Both','EN')) { Build-Edition 'international (en)' @('ENGLISH') (Join-Path $PSScriptRoot 'OverFieldLauncher-EN.exe') }

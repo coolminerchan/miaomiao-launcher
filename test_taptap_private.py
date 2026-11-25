@@ -45,4 +45,26 @@ class PrivateBoundaries(unittest.TestCase):
         self.assertIn('official-token-check-disabled',source)
 
 
+class SteamOverlayPolicyTests(unittest.TestCase):
+    def configuration(self, build):
+        with tempfile.TemporaryDirectory() as directory:
+            client=Path(directory)/'profiles/steam/client'
+            client.mkdir(parents=True)
+            (client/'GameAssembly.dll').write_bytes(b'synthetic-build')
+            with patch.object(identity,'classify',return_value='quicksdk-pc'), patch.object(runner.hashlib,'sha256') as digest:
+                digest.return_value.hexdigest.return_value=build
+                return runner.validated_config(client,'127.0.0.1',20080,1000000)
+    def test_pinned_steam_build_enables_only_overlay_policy(self):
+        build=next(key for key,kind in runner.SUPPORTED_BUILDS.items() if kind=='steam')
+        self.assertIs(self.configuration(build)['quietErrorOverlay'],True)
+    def test_non_steam_adapter_keeps_previous_policy(self):
+        self.assertIs(self.configuration(runner.SUPPORTED_GAME_ASSEMBLY)['quietErrorOverlay'],False)
+    def test_agent_does_not_replace_game_logging(self):
+        source=runner.agent_source({'quietErrorOverlay':True,'uid':1000000,'host':'127.0.0.1','port':20080})
+        self.assertIn("cfg.quietErrorOverlay === true",source)
+        self.assertIn("utf8('open_error_log')",source)
+        self.assertIn('error-overlay-policy-installed',source)
+        self.assertEqual(source.count('Interceptor.replace('),3)
+        self.assertNotIn('logMessageReceived',source)
+
 if __name__=='__main__':unittest.main()

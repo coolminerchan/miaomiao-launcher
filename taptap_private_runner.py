@@ -38,7 +38,10 @@ def validated_config(client, host, port, uid):
     digest = hashlib.sha256((client/'GameAssembly.dll').read_bytes()).hexdigest()
     if digest not in SUPPORTED_BUILDS:
         raise ValueError('Unverified GameAssembly version; refuse to apply this experimental adapter.')
-    return {'host':str(address),'port':int(port),'uid':int(uid)}
+    return {'host':str(address),'port':int(port),'uid':int(uid),
+            # Only the pinned Steam build opts out of the developer error overlay.
+            # File logging and ordinary game failure/disconnection dialogs remain.
+            'quietErrorOverlay': SUPPORTED_BUILDS[digest] == 'steam'}
 
 
 def agent_source(config):

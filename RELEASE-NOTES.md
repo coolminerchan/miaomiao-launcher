@@ -2,6 +2,16 @@
 
 清爽的天空蓝与海洋青动漫风界面，提供单机/局域网服务管理、本地 UID 登录、独立存档、账号数据导入与备份，以及房间和玩家管理。按钮加大、间距更宽，小窗口使用滚动布局，避免文字相互挤压。
 
+## v1.2.2 国际服专用热修复
+
+- 仅更新英文 Steam 国际服，国服 v1.2.1 便携包字节不变。
+- 对已验证 Steam 私服副本的 GM 配置关闭开发 Error 窗口策略，不全局替换日志或吞异常，保留普通失败及断线提示。
+- 实际 IL2CPP setter/getter 验证开关为 false，其他 GM 字段不变；138 项回归通过。
+- 退出私服游戏后重新启动才能加载补丁；无需删除或重新导入存档。
+- 截图提示的 ShopPoolConfigure 缺项属于独立兼容性问题，本补丁不宣称商店功能已全部实现。
+- [英文国际服下载](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.2.2/OverFieldLauncher-EN-portable.zip)
+- [国服原版下载（不变）](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.2.1/OverFieldLauncher-CN-portable.zip)
+
 ## v1.2.1 更新
 
 - 提供 **中文国服**与 **英文 Steam 国际服**两份独立便携包；正式版本号统一为 1.2.1。
