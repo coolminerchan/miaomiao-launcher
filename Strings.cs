@@ -1,4 +1,4 @@
-// English string table. The Chinese build returns the original text; the
+﻿// English string table. The Chinese build returns the original text; the
 // English build returns the translation for the same key.
 using System.Collections.Generic;
 
@@ -16,6 +16,17 @@ namespace OverFieldLocal
 #endif
         static readonly Dictionary<string, string> Map = new Dictionary<string, string>
         {
+            { " 已有存档，未写入。请先备份该账号或换用其他 UID。", " already has a save and was not written. Back that account up first or use another UID." },
+            { " 个角色\n\n确认写入？", " characters\n\nWrite it now?" },
+            { " 个，装备响应 ", " placeholders, equipment responses " },
+            { " 条", " entries" },
+            { " 个数据包", " packets" },
+            { " 个角色\n\n将导入当前模式的独立数据目录。已有数据会先备份；其他 UID 保留。\n运行中的服务会先停止，并断开在线玩家。\n角色、装备和背包会写入存档，尚未支持的模块会保留原始抓包数据。", " characters\n\nIt is imported into this mode's isolated data folder. Existing data is backed up first and other UIDs are kept.\nRunning services stop first and online players are disconnected.\nCharacters, equipment and the bag are written to the save; modules that are not supported yet keep their raw captured data." },
+            { " 的资料。原数据已有备份，其他 UID 保留。", "'s data. The previous data is backed up and other UIDs are kept." },
+            { " 的本地游戏，请稍候…", "'s local game, please wait…" },
+            { " 服务，请稍候…", " services, please wait…" },
+            { " 登录。", " now." },
+            { " 更新", "Update" },
             { "国际服", "International" },
             { "已采集", "Collected" },
             { "已收到（列表为空）", "Received (empty list)" },
