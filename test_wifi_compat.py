@@ -76,5 +76,33 @@ class RawIpCompatTests(unittest.TestCase):
             frame=b'\xff'*6+b'\x11'*6+b'\x08\x00'+ipv4_tcp()
             source=Path(d)/'eth.pcapng';source.write_bytes(capture([frame]))
             self.assertEqual(prepare_capture(source),source)
+    def test_mixed_wifi_and_bare_ip_splits_interfaces(self):
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/'mixed-wifi-ip.pcapng'
+            raw=capture([wifi(protected=True),wifi(protected=False),ipv4_tcp()])
+            source.write_bytes(raw)
+            result=prepare_capture(source)
+            self.assertNotEqual(result,source);self.assertEqual(source.read_bytes(),raw)
+            changed=result.read_bytes()
+            # Two IDBs after SHB: IDB 0 -> 105 (Wi-Fi), IDB 1 -> 101 (RAW IP)
+            off,idbs,epbs=0,[],[]
+            while off+12<=len(changed):
+                kind,length=struct.unpack_from('<II',changed,off)
+                if kind==1:idbs.append(struct.unpack_from('<H',changed,off+8)[0])
+                elif kind==6:
+                    iid,_,_,cap,_=struct.unpack_from('<IIIII',changed,off+8)
+                    epbs.append((iid,changed[off+28:off+28+cap]))
+                off+=length
+            self.assertEqual(idbs,[105,101])
+            self.assertEqual([iid for iid,_ in epbs],[0,0,1])
+            self.assertEqual(epbs[0][1][1]&0x40,0)
+    def test_non_ethernet_linktype_is_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            header=block(0x0a0d0d0a,struct.pack('<IHHq',0x1a2b3c4d,1,0,-1))
+            header+=block(1,struct.pack('<HHI',105,0,65535))
+            pkt=wifi(protected=True)
+            header+=block(6,struct.pack('<IIIII',0,0,0,len(pkt),len(pkt))+pkt)
+            source=Path(d)/'native-wifi.pcapng';source.write_bytes(header)
+            self.assertEqual(prepare_capture(source),source)
 
 if __name__=='__main__':unittest.main()
