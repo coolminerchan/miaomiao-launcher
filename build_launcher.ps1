@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $taskCompiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $taskSources = @(
     "$PSScriptRoot\Launcher.cs"
+    "$PSScriptRoot\Friendly.cs"
     "$PSScriptRoot\SeasideUI.cs"
     "$PSScriptRoot\RoomManagerForm.cs"
     "$PSScriptRoot\Strings.cs"

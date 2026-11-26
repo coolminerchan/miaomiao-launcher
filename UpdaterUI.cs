@@ -87,7 +87,7 @@ namespace OverFieldLocal
                 if (exists) updaterAutomatic = ParseUpdaterAutomatic(File.ReadAllText(settings));
             } catch (Exception e) {
                 updaterAutomatic = false; settingsError = true;
-                Append(UText("更新设置读取失败，自动更新已暂停：", "Update settings unavailable; automatic updates paused: ") + e.Message);
+                Append(UText("更新设置读取失败，自动更新已暂停：", "Update settings unavailable; automatic updates paused: ") + Friendly.Describe(e, UText("读取更新设置", "Reading update settings")));
             }
             updaterPause.Text = updaterAutomatic ? UText("暂停自动", "Pause auto") : UText("恢复自动", "Resume auto");
             SetUpdaterStatus(settingsError ? UText("更新设置损坏或不可读 · 已暂停自动更新", "Update settings invalid / unreadable · Auto updates paused") :
@@ -115,7 +115,7 @@ namespace OverFieldLocal
         {
             if (!updaterAllowed) return;
             try { WriteUpdaterSettings(backend.BaseDir, updaterAutomatic); }
-            catch (Exception e) { Append(UText("更新设置保存失败：", "Cannot save update settings: ") + e.Message); }
+            catch (Exception e) { Append(UText("更新设置保存失败：", "Cannot save update settings: ") + Friendly.Describe(e, UText("保存更新设置", "Saving update settings"))); }
         }
         internal static bool ParseUpdaterAutomatic(string json)
         {
@@ -260,7 +260,7 @@ namespace OverFieldLocal
             }
             return idle;
         }
-        void UpdaterError(Exception e) { SetUpdaterStatus(UText("更新暂不可用 · 原版本可继续使用", "Update unavailable · Current version remains usable")); if (!closing) Append(UText("自动更新：", "Auto update: ") + e.Message); }
+        void UpdaterError(Exception e) { SetUpdaterStatus(UText("更新暂不可用 · 原版本可继续使用", "Update unavailable · Current version remains usable")); if (!closing) Append(UText("自动更新：", "Auto update: ") + Friendly.Describe(e, UText("自动更新", "Auto update"))); }
         static string UpdaterValue(Dictionary<string, object> data, string key) { return data != null && data.ContainsKey(key) ? Convert.ToString(data[key]) : ""; }
         // Check every existing component, including files and dangling directory links.
         // Missing components are allowed so a safe runtime directory can be created.
