@@ -2,9 +2,11 @@
 
 Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、独立存档、公服账号数据采集与导入、房间和玩家管理。界面采用原创天空蓝/海洋青动漫海边插画、宽松按钮与独立采集页面，不嵌入游戏截图或玩家数据。
 
-## 当前版本 v1.4.7（2026-11-26）
+## 当前版本 v1.4.8（2026-11-26）
 
-修复空闲重启倒计时被启动器自身状态轮询反复重置、导致更新永远装不上的问题；现在只有游戏/服务/采集等真实活动才会取消倒计时。详见[更新记录](RELEASE-NOTES.md)。
+参照 MAA 的更新器加固了安装环节：替换文件时遇到瞬时占用会退避重试而不是直接失败；写入期间持有单实例互斥量，避免双击启动器跑在半更新的文件树上；更新成功会记录并显示「已更新到 X」。详见[更新记录](RELEASE-NOTES.md)。
+
+v1.4.7 修复：空闲重启倒计时被自身状态轮询反复重置，以及国际版更新在交接时因文件名假设被拒。
 
 v1.4.6 修复：暂停自动更新后手动下载的包装不上、重启后丢失已下载的暂存包。
 
@@ -20,9 +22,9 @@ v1.4.2修复进入尚未登记的自己的频道时，网关误判并断链导�
 
 存档、配置、运行数据、游戏本体和第三方安卓APK不在自动更新范围；本地受管文件有改动时暂停而非覆盖。详见[自动更新说明](docs/auto-update.md)。**旧版首次需升级到带更新模块的v1.4.0，此后由启动器自动获取更新。**
 
-- [中文国服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.7/OverFieldLauncher-CN-portable.zip)
-- [英文 Steam 国际服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.7/OverFieldLauncher-EN-portable.zip)
-- [安卓 3.1 第三方原包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.7/OverField-Android-Backup-v3.1-third-party.apk)：安卓手机独立使用，**第三方制作，非本项目开发/修改**；原始字节及签名保持，权限/隐私/兼容限制见[安卓说明](docs/android-backup.md)。
+- [中文国服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.8/OverFieldLauncher-CN-portable.zip)
+- [英文 Steam 国际服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.8/OverFieldLauncher-EN-portable.zip)
+- [安卓 3.1 第三方原包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.4.8/OverField-Android-Backup-v3.1-third-party.apk)：安卓手机独立使用，**第三方制作，非本项目开发/修改**；原始字节及签名保持，权限/隐私/兼容限制见[安卓说明](docs/android-backup.md)。
 
 Windows 采集择优集成 1.0.12 新手增强：双语预检查、采集时管理员确认、结果导航和探索观测报告；保留 GUI 启停协议、Steam 地址及方向、混合 Wi-Fi/RAW、脱敏与 Lolo 导入门禁。探索未知不当0，总量未验证不显示假百分比，报告不代表已恢复全部游戏进度。详见[采集集成说明](docs/collector-1012.md)。
 

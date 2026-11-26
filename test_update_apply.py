@@ -502,6 +502,105 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_files(files)
 
+class ReplaceTests(unittest.TestCase):
+    """The atomic replace must survive a transiently locked destination."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='replace-')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.src = self.root / 'src.bin'
+        self.dst = self.root / 'dst.bin'
+        self.src.write_bytes(b'new content')
+        self.dst.write_bytes(b'old content')
+
+    def test_replaces_existing_file(self):
+        apply._replace(self.src, self.dst)
+        self.assertEqual(self.dst.read_bytes(), b'new content')
+        self.assertFalse(self.src.exists())
+
+    def test_retries_sharing_violation_then_succeeds(self):
+        """A briefly locked destination must not fail an otherwise valid update."""
+        real = apply._replace_once
+        calls = {'n': 0}
+
+        def flaky(src, dst):
+            calls['n'] += 1
+            if calls['n'] < 3:
+                error = OSError(32, 'sharing violation')
+                error.winerror = 32
+                raise error
+            return real(src, dst)
+
+        with patch.object(apply, '_replace_once', flaky), \
+                patch.object(apply.time, 'sleep', lambda *_: None):
+            apply._replace(self.src, self.dst)
+        self.assertEqual(calls['n'], 3)
+        self.assertEqual(self.dst.read_bytes(), b'new content')
+
+    def test_gives_up_after_budget(self):
+        def always(src, dst):
+            error = OSError(32, 'sharing violation')
+            error.winerror = 32
+            raise error
+
+        with patch.object(apply, '_replace_once', always), \
+                patch.object(apply.time, 'sleep', lambda *_: None):
+            with self.assertRaises(OSError):
+                apply._replace(self.src, self.dst)
+
+    def test_non_transient_error_is_not_retried(self):
+        calls = {'n': 0}
+
+        def broken(src, dst):
+            calls['n'] += 1
+            error = OSError(2, 'file not found')
+            error.winerror = 2
+            raise error
+
+        with patch.object(apply, '_replace_once', broken), \
+                patch.object(apply.time, 'sleep', lambda *_: None):
+            with self.assertRaises(OSError):
+                apply._replace(self.src, self.dst)
+        self.assertEqual(calls['n'], 1)
+
+
+class AppliedNoticeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='notice-')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_records_applied_version(self):
+        apply._record_applied(self.root, 'CN', '9.9.9')
+        doc = json.loads((self.root / 'runtime/updates/last-update.json').read_text(encoding='utf-8'))
+        self.assertEqual(doc['version'], '9.9.9')
+        self.assertEqual(doc['edition'], 'CN')
+
+    def test_apply_writes_notice(self):
+        f = Fixture(self.root)
+        result = f.run()
+        self.assertEqual(result['status'], 'applied', result)
+        doc = json.loads((self.root / 'runtime/updates/last-update.json').read_text(encoding='utf-8'))
+        self.assertEqual(doc['version'], '2.0.0')
+
+    def test_notice_failure_does_not_fail_update(self):
+        f = Fixture(self.root)
+        real = apply._durable
+
+        def only_notice_fails(path, data):
+            if Path(path).name == 'last-update.json':
+                raise OSError('disk full')
+            return real(path, data)
+
+        with patch.object(apply, '_durable', only_notice_fails):
+            result = f.run()
+        # The update itself must still be reported as applied.
+        self.assertEqual(result['status'], 'applied', result)
+        self.assertFalse((self.root / 'runtime/updates/last-update.json').exists())
+
+
+class AllowlistTests(unittest.TestCase):
     def test_allowlist(self):
         for p in ('OverFieldLauncher.exe', 'OverFieldLauncher-EN.exe', 'model_schema.json',
                   'backup-tool/proto_gen/net_pb2.py', 'docs/release.md',

@@ -50,14 +50,23 @@ def _sync_dir(path):
             os.close(fd)
 
 
-def _replace(src, dst):
+def _replace_once(src, dst):
     assert_no_reparse(src)
     assert_no_reparse(dst)
     if os.name == 'nt':
+        # ReplaceFileW keeps the destination's attributes and is atomic on NTFS,
+        # but it refuses when another handle is open. MoveFileEx is the fallback.
+        import ctypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        replace = kernel32.ReplaceFileW
+        replace.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                            ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+        replace.restype = ctypes.c_int
+        if Path(dst).exists() and replace(str(dst), str(src), None, 0, None, None):
+            return
         # MOVEFILE_WRITE_THROUGH + REPLACE_EXISTING: unlike rename alone,
         # Windows explicitly waits for the move to reach storage.
-        import ctypes
-        move = ctypes.WinDLL('kernel32', use_last_error=True).MoveFileExW
+        move = kernel32.MoveFileExW
         move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
         move.restype = ctypes.c_int
         if not move(str(src), str(dst), 0x1 | 0x8):
@@ -65,6 +74,31 @@ def _replace(src, dst):
     else:
         os.replace(src, dst)
         _sync_dir(Path(dst).parent)
+
+
+# Transient sharing violations are normal on Windows: antivirus, the indexer or a
+# just-exited process can hold a handle for a moment. Retrying beats failing an
+# otherwise valid update, which is what MAA's updater does too.
+REPLACE_ATTEMPTS = 8
+REPLACE_BACKOFF = 0.05
+
+
+def _replace(src, dst):
+    """Replace dst with src, retrying transient Windows sharing violations."""
+    last = None
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            _replace_once(src, dst)
+            return
+        except OSError as error:
+            last = error
+            # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION / ERROR_ACCESS_DENIED
+            if getattr(error, 'winerror', None) not in (32, 33, 5):
+                raise
+            if attempt + 1 >= REPLACE_ATTEMPTS:
+                break
+            time.sleep(REPLACE_BACKOFF * (2 ** attempt))
+    raise last
 
 
 def _durable(path, data):
@@ -110,6 +144,37 @@ def _lock(work):
                 msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _launcher_mutex(edition):
+    """Hold the launcher's single-instance mutex while installation files change.
+
+    Otherwise a user double-clicking mid-apply starts a second launcher against a
+    half-replaced tree. The new instance sees the mutex taken, focuses nothing and
+    exits, which is exactly what should happen during an update.
+    """
+    if os.name != 'nt':
+        yield
+        return
+    import ctypes
+    name = 'Local\\OverFieldLocalLauncherEN' if edition == 'EN' else 'Local\\OverFieldLocalLauncher'
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    create = kernel32.CreateMutexW
+    create.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+    create.restype = ctypes.c_void_p
+    close = kernel32.CloseHandle
+    close.argtypes = [ctypes.c_void_p]
+    close.restype = ctypes.c_int
+    handle = create(None, 0, name)
+    ERROR_ALREADY_EXISTS = 183
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    held = ctypes.get_last_error() != ERROR_ALREADY_EXISTS
+    try:
+        yield held
+    finally:
+        close(handle)
 
 
 def _processes():
@@ -470,6 +535,24 @@ def _launcher_exe(root):
     return None
 
 
+def _record_applied(root, edition, version):
+    """Leave a one-line record of the applied version for the launcher to report.
+
+    Without it a successful update looks identical to a failed one from the outside:
+    the window just comes back at some version. Best effort only - a failure here
+    must never fail an otherwise complete update.
+    """
+    try:
+        path = root / 'runtime/updates/last-update.json'
+        assert_no_reparse(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _durable(path, json.dumps({'edition': edition, 'version': version,
+                                   'applied_at': int(time.time())},
+                                  ensure_ascii=False, sort_keys=True).encode('utf-8'))
+    except Exception:
+        pass
+
+
 def _restart_result(result, root, edition):
     try:
         journal_path = assert_no_reparse(root / 'runtime/updates/transaction/journal.json')
@@ -571,26 +654,31 @@ def apply_update(root, stage, edition, parent_pid=None, restart=False, *,
                 return finish({'status': 'conflict', 'reason': 'local_changes', 'details': conflicts})
             _journal_write(work / 'journal.json', journal)
             journal_started = True
+            # Only the write phase takes the single-instance mutex: a double-click
+            # now cannot start a second launcher against a half-replaced tree. It is
+            # released here so the restart at the end can start normally.
             try:
-                for i, op in enumerate(operations):
-                    target = assert_no_reparse(root / op['path'])
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    current = _meta(target) if target.is_file() else None
-                    if current != op['old']:
-                        raise ValueError('target changed during apply: ' + op['path'])
-                    if op['new'] is None:
-                        target.unlink()
-                        _sync_dir(target.parent)
-                    else:
-                        _replace(work / 'prepared' / str(indices[op['path']]), target)
-                    if fault_hook:
-                        fault_hook(i, op)
+                with _launcher_mutex(edition):
+                    for i, op in enumerate(operations):
+                        target = assert_no_reparse(root / op['path'])
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        current = _meta(target) if target.is_file() else None
+                        if current != op['old']:
+                            raise ValueError('target changed during apply: ' + op['path'])
+                        if op['new'] is None:
+                            target.unlink()
+                            _sync_dir(target.parent)
+                        else:
+                            _replace(work / 'prepared' / str(indices[op['path']]), target)
+                        if fault_hook:
+                            fault_hook(i, op)
                 journal['state'] = 'committed'
                 _journal_write(work / 'journal.json', journal)
             except Exception:
                 _recover(root, work)
                 raise
         result = {'status': 'applied', 'version': manifest['version'], 'edition': edition, 'recovered': recovered}
+        _record_applied(root, edition, manifest['version'])
         return finish(result)
     except Exception as e:
         return finish({'status': 'error', 'reason': str(e), 'transaction_started': journal_started})

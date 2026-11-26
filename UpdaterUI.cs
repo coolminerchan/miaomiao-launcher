@@ -93,9 +93,11 @@ namespace OverFieldLocal
             // A stage downloaded by an earlier session must still be installable after a
             // restart; otherwise a paused launcher leaves the payload in staging forever.
             string resumed = ResumeUpdaterStage();
+            string applied = ConsumeAppliedNotice();
             string idle = updaterAutomatic ? UText("自动更新 · 等待后台检查", "Auto update · Waiting for background check")
                                            : UText("自动更新已暂停", "Automatic updates paused");
-            if (resumed != null) idle = UText("已下载 " + resumed + " · 空闲后安装", "Downloaded " + resumed + " · installs when idle");
+            if (applied != null) idle = UText("已更新到 " + applied + " · 当前已是最新", "Updated to " + applied + " · Up to date");
+            else if (resumed != null) idle = UText("已下载 " + resumed + " · 空闲后安装", "Downloaded " + resumed + " · installs when idle");
             SetUpdaterStatus(settingsError ? UText("更新设置损坏或不可读 · 已暂停自动更新", "Update settings invalid / unreadable · Auto updates paused") : idle);
             updaterTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             updaterTimer.Tick += async delegate { await TickUpdater(); };
@@ -146,6 +148,25 @@ namespace OverFieldLocal
                 // The unique absolute temp path was checked before creation; never remove a redirected path.
                 if (SafeUpdaterPath(temporary) && File.Exists(temporary)) File.Delete(temporary);
             }
+        }
+        /// <summary>
+        /// Read and consume the record the helper writes after a successful apply.
+        /// Without this a finished update and a failed one look identical: the window
+        /// simply reappears and the user cannot tell which happened.
+        /// </summary>
+        string ConsumeAppliedNotice()
+        {
+            try {
+                string path = Path.Combine(UpdaterDirectory, "last-update.json");
+                if (!SafeUpdaterPath(path) || !File.Exists(path)) return null;
+                var data = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                File.Delete(path);
+                if (data == null || !data.ContainsKey("version")) return null;
+                string version = Convert.ToString(data["version"]);
+                string applied = Convert.ToString(data.ContainsKey("edition") ? data["edition"] : "");
+                if (String.IsNullOrEmpty(version) || applied != UpdaterEdition) return null;
+                return version;
+            } catch (Exception) { return null; }
         }
         bool UpdaterLocallyIdle()
         {
