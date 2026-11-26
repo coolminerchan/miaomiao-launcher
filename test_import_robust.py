@@ -204,6 +204,13 @@ class GardenImportTests(unittest.TestCase):
                                      (self.uid,)).fetchone()
         return dict(row) if row else None
 
+    def read_payload(self):
+        import gzip
+        with closing(sqlite3.connect(self.database)) as connection:
+            row = connection.execute(
+                "SELECT bin_data FROM of_game ORDER BY rowid DESC LIMIT 1").fetchone()
+        return json.loads(gzip.decompress(row[0]).decode("utf-8"))
+
     def test_furniture_reaches_of_home_as_json(self):
         self.import_garden({
             "29855943319617915": {"furniture_id": "29855943319617915",
@@ -229,6 +236,21 @@ class GardenImportTests(unittest.TestCase):
         self.import_garden({"1": {"furniture_id": "1", "furniture_item_id": 9}},
                            channel=999999)
         self.assertIsNone(self.read_home())
+
+    def test_placed_furniture_counts_reach_the_item_map(self):
+        """AddFurnitureItem increments this map; skipping it under-counts placed items."""
+        main = self.main()
+        main["furniture_item_info"] = [
+            {"item_id": 5041102, "num": "1"},
+            {"item_id": 5043911, "num": "2"},
+        ]
+        source = build_zip(self.root / "f.zip", main, {})
+        capture_import.import_capture(source, self.profile, self.uid, True, True)
+        payload = self.read_payload()
+        furniture = payload["item"]["furnitureItemMap"]
+        self.assertEqual(furniture["5041102"]["num"], 1)
+        self.assertEqual(furniture["5043911"]["num"], 2)
+        self.assertEqual(furniture["5041102"]["itemId"], 5041102)
 
     def test_non_garden_scene_is_ignored(self):
         self.import_garden({"1": {"furniture_id": "1", "furniture_item_id": 9}},

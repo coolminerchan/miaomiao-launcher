@@ -256,6 +256,19 @@ def build_player(main, entries, report=None):
                 data = dict(captured, item_id=captured[id_key], item_type=tag, num=1, pack_type=0)
                 items[target][str(captured['instance_id'])] = model(kind, data)
     items['instanceIndex'] = greatest + 1
+    # Placed-furniture counts live in their own map; the server increments it via
+    # AddFurnitureItem and reports it through FurnitureItemInfo(), so an import that
+    # skips it makes every placed item look uncounted in the bag.
+    for entry in as_list(main.get('furniture_item_info')):
+        if not isinstance(entry, dict):
+            skipped += 1
+            continue
+        item_id = as_int(entry.get('item_id'))
+        if item_id <= 0:
+            skipped += 1
+            continue
+        items['furnitureItemMap'][str(item_id)] = model('FurnitureItemInfo', {
+            'itemId': item_id, 'num': as_int(entry.get('num'), 1)})
     # PackNotice includes gathering tools and inscriptions that equipment-list
     # responses omit. Preserve these variants and their original inventory tags.
     variants=[('weapon','itemWeaponMap','ItemWeaponInfo','weapon_id'),('armor','itemArmorMap','ItemArmorInfo','armor_id'),('poster','itemPosterMap','ItemPosterInfo','poster_id'),('inscription','itemInscriptionMap','ItemInscriptionInfo','inscription_id')]
