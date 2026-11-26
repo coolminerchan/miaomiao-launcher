@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent
 ALLOWED = {
     'Launcher.cs', 'SeasideUI.cs', 'RoomManagerForm.cs', 'Strings.cs', 'test_editions.py', 'docs/editions.md', 'launcher.manifest', 'launcher.ico',
     'build_launcher.ps1', 'test_pcap_streaming.py', 'test_capture_modes.py', 'test_collector_preflight.py', 'test_collector_integration.py', 'test_collector_gui_contract.py', 'LocalUidSDK.cpp', 'sdk.def', 'build_sdk.cmd',
-    'World-Control.ps1', 'Lan-Firewall.ps1', 'profile_manager.py',
+    'World-Control.ps1', 'Lan-Firewall.ps1', 'profile_manager.py', 'UpdaterUI.cs', 'launcher_updater.py', 'update_apply.py', 'update_policy.py', 'update_trust.py', 'build_update_assets.py', 'test_signed_updater_download.py', 'test_update_apply.py', 'test_updater_gui_contract.py', 'docs/auto-update.md',
     'capture_import.py', 'room_gateway.py', 'proto_fields.json',
     'model_schema.json', 'service_runner.py', 'make_junction.ps1',
     'repair_version.py', 'lolo_redirect.py', 'test_launcher.py',

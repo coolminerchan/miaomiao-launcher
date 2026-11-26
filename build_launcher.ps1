@@ -10,6 +10,7 @@ $taskSources = @(
     "$PSScriptRoot\SeasideUI.cs"
     "$PSScriptRoot\RoomManagerForm.cs"
     "$PSScriptRoot\Strings.cs"
+    "$PSScriptRoot\UpdaterUI.cs"
 )
 $taskReferences = @(
     '/reference:System.Windows.Forms.dll'

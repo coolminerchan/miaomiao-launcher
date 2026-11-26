@@ -15,13 +15,13 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 #if ENGLISH
-[assembly: System.Reflection.AssemblyFileVersion("1.3.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.0")]
 [assembly: System.Reflection.AssemblyTitle("OverField International Launcher")]
 [assembly: System.Reflection.AssemblyProduct("OverField International Launcher")]
 #else
-[assembly: System.Reflection.AssemblyFileVersion("1.3.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.0")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 #endif
@@ -743,13 +743,14 @@ namespace OverFieldLocal
                 backend.CancelAll();
                 // Detached services would otherwise survive this process and keep
                 // holding 18080/18100. Reap only what this launcher started.
-                if (!uiPreview && smokePath == null && e.CloseReason != CloseReason.WindowsShutDown)
+                if (!updaterHandoff && !uiPreview && smokePath == null && e.CloseReason != CloseReason.WindowsShutDown)
                 {
                     try { Cursor = Cursors.WaitCursor; backend.StopCaptureQuietly(); backend.Cleanup(); }
                     catch { }
                     finally { Cursor = Cursors.Default; }
                 }
             };
+            InitializeUpdater(args);
         }
         string PreflightText(Dictionary<string,object> report, bool compact = false)
         {
