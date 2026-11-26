@@ -18,7 +18,7 @@ $taskReferences = @(
 )
 
 function Build-Edition([string]$Name, [string[]]$Defines, [string]$Output) {
-    $taskArguments = @('/nologo', '/target:winexe', '/optimize+', '/platform:anycpu') + $taskReferences
+    $taskArguments = @('/nologo', '/target:winexe', '/optimize+', '/platform:anycpu', '/codepage:65001') + $taskReferences
     foreach ($define in $Defines) { $taskArguments += "/define:$define" }
     $taskArguments += "/win32manifest:$PSScriptRoot\launcher.manifest"
     $taskArguments += "/win32icon:$PSScriptRoot\launcher.ico"

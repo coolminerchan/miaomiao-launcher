@@ -10,6 +10,7 @@ import argparse
 import ctypes
 import datetime as dt
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -79,7 +80,7 @@ def can_decode(python: Path) -> bool:
     try:
         result = subprocess.run(
             [str(python), "-B", "-c", "import cramjam, google.protobuf"],
-            capture_output=True, timeout=60, creationflags=NO_WINDOW,
+            capture_output=True, timeout=10, creationflags=NO_WINDOW,
         )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -114,21 +115,53 @@ def powershell(script: str, timeout: int = 120) -> subprocess.CompletedProcess:
     )
 
 
+def active_world_records():
+    """Inspect this installation's legacy and per-mode state without stopping it."""
+    active = []
+    for path in RUNTIME.glob("world-state*.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise ValueError("无法核对私服状态：" + path.name) from exc
+        if isinstance(record, dict) and record.get("Active"):
+            active.append(path.name)
+    return active
+
+
 def preflight() -> dict:
-    problems = []
-    if not (BASE / "backup-tool" / "capture.ps1").is_file():
-        problems.append("缺少 backup-tool/capture.ps1")
-    if not (BASE / "backup-tool" / "parse_pcap.py").is_file():
-        problems.append("缺少 backup-tool/parse_pcap.py")
-    if not python_exe().is_file():
-        problems.append("缺少 Python 运行时")
-    if not tshark_exe().is_file():
-        problems.append("缺少 TShark")
-    if not PACKETMON.is_file():
-        problems.append("系统缺少 PktMon（需要 Windows 10 1809 及以上）")
-    if not is_admin():
-        problems.append("需要管理员权限才能采集公服流量")
-    return {"ok": not problems, "problems": problems}
+    decoder, tshark = python_exe(), tshark_exe()
+    helper = BASE / "backup-tool" / "collector_preflight.py"
+    checks = []
+    if helper.is_file():
+        spec = importlib.util.spec_from_file_location("launcher_collector_preflight", helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        inspection = module.inspect_runtime(BASE / "backup-tool", decoder, tshark, timeout=8)
+        checks.extend(inspection["checks"])
+    else:
+        inspection = {"ready": False}
+        checks.append({"id": "preflight_helper", "state": "error", "message": "缺少采集预检查组件，请完整解压。",
+                       "messageEn": "Collector preflight component missing; extract the full package."})
+    try:
+        worlds = active_world_records()
+        checks.append({"id": "private_world", "state": "error" if worlds else "ok",
+                       "message": "请先停止本安装目录的私服服务，再采集公服。" if worlds else "本安装目录没有标记为运行中的私服。",
+                       "messageEn": "Stop this installation's private world before official capture." if worlds else "No active private world is recorded in this installation."})
+    except ValueError:
+        worlds = ["unknown"]
+        checks.append({"id": "private_world", "state": "unknown", "message": "无法核对私服状态，请先检查运行记录。",
+                       "messageEn": "Cannot verify private-world state; check the run log first."})
+    optional = {"location", "output_permissions"}
+    problems = [row["message"] for row in checks if row["id"] not in optional and row["state"] in ("error", "unknown")]
+    elevated = is_admin()
+    # The GUI may restart itself elevated; PktMon status can be denied before
+    # that restart. All dependencies are still rechecked before any capture/game.
+    privilege = {"administrator", "pktmon"}
+    basic_ready = all(row["state"] == "ok" for row in checks if row["id"] not in optional | privilege)
+    needs_elevation = os.name == "nt" and not elevated and basic_ready and PACKETMON.is_file()
+    return {"ok": bool(inspection["ready"]) and elevated and not worlds,
+            "problems": problems, "checks": checks, "needsElevation": needs_elevation,
+            "python": str(decoder), "tshark": str(tshark)}
 
 
 def wait_capture_ready(process, ready_path: Path, timeout=40) -> dict:
@@ -163,21 +196,27 @@ def request_failed_start_stop(process, state):
     write_state(dict(state, active=process.poll() is None, phase="stopping", error="采集或公服启动失败，已发送停止信号"))
 
 
-def start(launcher_path=None) -> dict:
+def start(launcher_path=None, launcher_managed=False) -> dict:
     """Wait for actual capture readiness, then launch only the configured official EXE."""
+    if launcher_managed and (RUNTIME / "capture-launcher-exit.flag").exists():
+        raise ValueError("启动器已退出，未开始采集或启动游戏。")
     from official_launcher import validate_launcher, launch_official, clean_environment
     if read_state().get("active"):
         raise ValueError("已有采集正在进行，请先结束当前采集。")
     launcher = validate_launcher(launcher_path, BASE)
-    world_state = RUNTIME / "world-state.json"
-    if world_state.is_file() and json.loads(world_state.read_text(encoding="utf-8-sig")).get("Active"):
+    if active_world_records():
         raise ValueError("请先停止私服服务，再开始公服采集，避免流量混入私服。")
     report = preflight()
     if not report["ok"]:
         raise ValueError("无法开始采集：" + "；".join(report["problems"]))
+    if launcher_managed and (RUNTIME / "capture-launcher-exit.flag").exists():
+        raise ValueError("启动器已退出，未开始采集或启动游戏。")
     session = SESSIONS / dt.datetime.now().strftime("capture_%Y%m%d_%H%M%S_%f")
     session.mkdir(parents=True, exist_ok=True)
     STOP_FLAG.unlink(missing_ok=True)
+    if launcher_managed and (RUNTIME / "capture-launcher-exit.flag").exists():
+        STOP_FLAG.touch()
+        raise ValueError("启动器已退出，已保留停止信号。")
     ready_path = session / "capture-ready.json"
     from official_launcher import steam_app_id, steam_install_dir, server_addresses
     server_ips = []
@@ -188,8 +227,8 @@ def start(launcher_path=None) -> dict:
     command = [
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", str(BASE / "backup-tool" / "capture.ps1"), "-Mode", "Account",
-        "-OutDir", str(session), "-PythonExe", str(python_exe()),
-        "-TSharkExe", str(tshark_exe()), "-StopFlag", str(STOP_FLAG),
+        "-OutDir", str(session), "-PythonExe", str(report.get("python") or python_exe()),
+        "-TSharkExe", str(report.get("tshark") or tshark_exe()), "-StopFlag", str(STOP_FLAG),
         "-ReadyPath", str(ready_path),
     ]
     if server_ips:
@@ -239,8 +278,26 @@ def result_from_export(export: Path, session: Path):
             raise ValueError("账号ZIP不能链接到输出目录之外。")
         from capture_zip import inspect_account_zip
         inspect_account_zip(account_zip)
-    return {"session": str(session), "export": str(export),
-            "accountZip": str(account_zip) if account_zip else "", "playerUids": summary["player_uids"]}
+    result = {"session": str(session), "export": str(export),
+              "accountZip": str(account_zip) if account_zip else "", "playerUids": summary["player_uids"]}
+    if isinstance(summary.get("exploration"), dict):
+        # The full evidence stays in export/ZIP. Keep GUI IPC and status polling
+        # bounded instead of repeating thousands of IDs and packet records.
+        evidence = summary["exploration"]
+        result["exploration"] = {key: evidence[key] for key in (
+            "schema_version", "report_available", "evidence_available", "summary", "database_imported") if key in evidence}
+    report_name = summary.get("exploration_report")
+    if isinstance(report_name, str) and report_name:
+        if Path(report_name).name != report_name or "\\" in report_name or Path(report_name).drive:
+            raise ValueError("探索报告产物路径不安全。")
+        report_path = export / report_name
+        if report_path.is_file():
+            if report_path.resolve().parent != export.resolve():
+                raise ValueError("探索报告不能链接到输出目录之外。")
+            result["explorationReport"] = str(report_path)
+    result["quality"] = {key: summary[key] for key in (
+        "successful_decode_count", "trailing_bytes_count", "decode_fallback_count") if key in summary}
+    return result
 
 
 def completed_result(session: Path):
@@ -310,20 +367,29 @@ def stop() -> dict:
     STOP_FLAG.parent.mkdir(parents=True, exist_ok=True)
     STOP_FLAG.write_text(dt.datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
     log("已发送结束采集信号")
+    write_state(dict(state, active=True, phase="stopping"))
 
     pid = int(state.get("pid") or 0)
+    if not pid and state.get("phase") not in ("decoding", "complete"):
+        write_state(dict(state, active=True, phase="stopping", error="无法确认采集进程身份；停止信号已保留"))
+        raise ValueError("无法确认采集进程身份，未自动停止或解包；请检查采集日志。")
     waited = 0
     while pid and waited < 1800:
         check = powershell(
             f"$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ 'alive' }} else {{ 'gone' }}"
         )
-        if (check.stdout or "").strip() != "alive":
+        observed = (check.stdout or "").strip()
+        if check.returncode != 0 or observed not in ("alive", "gone"):
+            write_state(dict(state, active=True, phase="stopping", error="采集进程状态暂不可确认；停止信号已保留"))
+            raise ValueError("采集进程状态暂不可确认，未强制终止或解包；请稍后重试。")
+        if observed == "gone":
             break
         time.sleep(2)
         waited += 2
     if pid and waited >= 1800:
-        log("等待抓包脚本结束超时，改为强制结束")
-        powershell(f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue")
+        log("等待抓包脚本结束超时；保留停止信号，不强制终止")
+        write_state(dict(state, active=True, phase="stopping", error="等待采集结束超时；原始数据与停止信号已保留"))
+        raise ValueError("等待采集结束超时；未强制结束进程或宣称完成，请检查日志后重试。")
     STOP_FLAG.unlink(missing_ok=True)
     write_state(dict(state, active=False, phase="decoding"))
     finished = completed_result(session)
@@ -362,7 +428,13 @@ def stop() -> dict:
 
 def status() -> dict:
     state = read_state()
-    readiness = preflight()
+    # Status polling must not run three native dependency probes on every tick.
+    # Full verification is the explicit preflight action and start barrier.
+    problems = []
+    if not (BASE / "backup-tool" / "capture.ps1").is_file(): problems.append("缺少采集脚本")
+    if not PACKETMON.is_file(): problems.append("系统缺少 PktMon")
+    if not is_admin(): problems.append("采集需要管理员权限")
+    readiness = {"ok": not problems, "problems": problems}
     return {
         "active": bool(state.get("active")),
         "session": state.get("session", ""),
@@ -376,8 +448,9 @@ def status() -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "stop", "status", "validate-launcher", "export-zip", "recover", "progress"])
+    parser.add_argument("action", choices=["start", "stop", "status", "preflight", "validate-launcher", "export-zip", "recover", "progress"])
     parser.add_argument("--launcher", type=Path)
+    parser.add_argument("--launcher-managed", action="store_true")
     parser.add_argument("--file", type=Path)
     parser.add_argument("--destination", type=Path)
     args = parser.parse_args()
@@ -400,7 +473,9 @@ def main() -> int:
                 result.update(kind="steam", appId=app_id,
                               install=str(install) if install else "")
         elif args.action == "start":
-            result = start(args.launcher)
+            result = start(args.launcher, launcher_managed=args.launcher_managed)
+        elif args.action == "preflight":
+            result = preflight()
         else:
             result = {"stop": stop, "status": status, "recover": recover}[args.action]()
         print(json.dumps(result, ensure_ascii=False))

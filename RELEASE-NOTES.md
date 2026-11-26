@@ -2,7 +2,23 @@
 
 清爽的天空蓝与海洋青动漫风界面，提供单机/局域网服务管理、本地 UID 登录、独立存档、账号数据导入与备份，以及房间和玩家管理。按钮加大、间距更宽，小窗口使用滚动布局，避免文字相互挤压。
 
-## v1.2.2 国际服专用热修复
+## v1.3.0 采集增强集成与安卓原包附件
+
+- 更新中文国服与英文 Steam 国际服两版，融合 Windows 1.0.12 新手增强：双语只读预检查、管理员确认后安全重启本版启动器、指南与结果导航。
+- 保留当前 GUI 就绪/停止接口、Steam 地址和协议方向、混合 Wi-Fi/RAW流式修正、敏感登录过滤及 Lolo 导入门禁，不整体倒灌旧控制脚本或 of-ps SQL。
+- 成功服务端响应生成 exploration.json / exploration.txt 并纳入账号ZIP；未采到为 null，总量未验证不计算百分比，地图3声明264/目录269保留为不一致提示。报告不等于已恢复Lolo游戏进度。
+- 增加解码成功数、残缺流尾和解压预算；GUI只传有界摘要。状态未知或等待超时不强杀PID、不虚报完成，关闭启动器给本安装发送协作停止信号。
+- 167 项自动回归与 12 组双版布局检查通过；最终便携包在发布前另行进行内置运行时和控制器检查。
+- 新增 **安卓3.1第三方原包**附件，在安卓手机独立使用，非本项目开发/修改；只恢复外部.apk文件名，原字节和签名保持。SHA-256: `08dc8ed0a91e15b752a8a7014b40889028db8d9b18fabf2ea5cd5cfebd1becc6`。
+
+**安卓提醒：**原包需要ADB/Shizuku等授权，主动登录可能顶号/切换家园；无障碍原版有全窗口明文日志风险，备份可能含登录信息。未安装、未修改、未作安全或全设备兼容认证；不要公开分享账号备份。安卓输出目前不能直接导入默认Lolo。详见 [安卓说明](docs/android-backup.md) 与 [采集集成说明](docs/collector-1012.md)。
+
+下载：
+- [中文国服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverFieldLauncher-CN-portable.zip)
+- [英文国际服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverFieldLauncher-EN-portable.zip)
+- [安卓第三方原包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverField-Android-Backup-v3.1-third-party.apk)
+
+## v1.2.2 国际服专用热修复（历史）
 
 - 仅更新英文 Steam 国际服，国服 v1.2.1 便携包字节不变。
 - 对已验证 Steam 私服副本的 GM 配置关闭开发 Error 窗口策略，不全局替换日志或吞异常，保留普通失败及断线提示。

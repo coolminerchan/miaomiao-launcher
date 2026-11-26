@@ -152,11 +152,11 @@ namespace OverFieldLocal
             captureHint.Dock=DockStyle.Fill;captureHint.AutoSize=false;captureHint.AutoEllipsis=true;captureHint.Font=Theme.Font(9);captureHint.ForeColor=Theme.Muted;captureHint.TextAlign=ContentAlignment.TopLeft;captureHint.Margin=Padding.Empty;
             captureHint.Text=Loc.S("抓包就绪后会打开公服。结束采集将生成账号 ZIP，并让你选择保存位置；入库是可选操作，取消或冲突不影响已交付的 ZIP。");
             captureRows.Controls.Add(captureHint,0,3);
-            var captureActions=Grid(3,1);for(int i=0;i<3;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100f/3));
-            SpaceButton(captureStart);SpaceButton(captureStop);SpaceButton(captureSaveZip,true);
-            captureActions.Controls.Add(captureStart,0,0);captureActions.Controls.Add(captureStop,1,0);captureActions.Controls.Add(captureSaveZip,2,0);
+            var captureActions=Grid(4,1);for(int i=0;i<4;i++)captureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
+            SpaceButton(capturePreflight);SpaceButton(captureStart);SpaceButton(captureStop);SpaceButton(captureSaveZip,true);
+            captureActions.Controls.Add(capturePreflight,0,0);captureActions.Controls.Add(captureStart,1,0);captureActions.Controls.Add(captureStop,2,0);captureActions.Controls.Add(captureSaveZip,3,0);
             captureRows.Controls.Add(captureActions,0,4);
-            captureRows.Controls.Add(FitLabel(Loc.S("采集项目清单 · 工具 1.0.9 · 实时核对 / 结束后最终核对"),9.5f,Theme.Text,FontStyle.Bold),0,5);
+            captureRows.Controls.Add(FitLabel(Loc.S("采集项目清单 · 1.0.12增强集成 · 实时/最终核对"),9.5f,Theme.Text,FontStyle.Bold),0,5);
             captureChecklist.Dock=DockStyle.Fill;captureChecklist.View=View.Details;captureChecklist.FullRowSelect=true;captureChecklist.MultiSelect=false;captureChecklist.HideSelection=false;
             captureChecklist.Font=Theme.Font(9);captureChecklist.BackColor=Theme.Panel;captureChecklist.ForeColor=Theme.Text;captureChecklist.BorderStyle=BorderStyle.FixedSingle;captureChecklist.Margin=new Padding(0,4,0,4);
             captureChecklist.Columns.Add(Loc.S("项目"),210);captureChecklist.Columns.Add(Loc.S("状态"),150);captureChecklist.Columns.Add(Loc.S("响应"),60);captureChecklist.Columns.Add(Loc.S("未采集时的操作建议"),250);

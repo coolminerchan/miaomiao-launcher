@@ -2,13 +2,23 @@
 
 Windows 单机 / 局域网服务端管理启动器，支持本地 UID 登录、独立存档、公服账号数据采集与导入、房间和玩家管理。界面采用原创天空蓝/海洋青动漫海边插画、宽松按钮与独立采集页面，不嵌入游戏截图或玩家数据。
 
-## 国际服专用补丁 v1.2.2
+## 当前版本 v1.3.0（2026-11-26）
+
+- [中文国服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverFieldLauncher-CN-portable.zip)
+- [英文 Steam 国际服便携版](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverFieldLauncher-EN-portable.zip)
+- [安卓 3.1 第三方原包](https://github.com/inori-dream/miaomiao-launcher/releases/download/v1.3.0/OverField-Android-Backup-v3.1-third-party.apk)：安卓手机独立使用，**第三方制作，非本项目开发/修改**；原始字节及签名保持，权限/隐私/兼容限制见[安卓说明](docs/android-backup.md)。
+
+Windows 采集择优集成 1.0.12 新手增强：双语预检查、采集时管理员确认、结果导航和探索观测报告；保留 GUI 启停协议、Steam 地址及方向、混合 Wi-Fi/RAW、脱敏与 Lolo 导入门禁。探索未知不当0，总量未验证不显示假百分比，报告不代表已恢复全部游戏进度。详见[采集集成说明](docs/collector-1012.md)。
+
+便携包带运行依赖，游戏本体不包含、不自动下载。两版请分别解压到独立目录。安卓APK不在Windows里执行，原版输出目前不能直接导入默认Lolo；不要公开分享账号ZIP、原始抓包或凭据日志。
+
+## 历史：国际服专用补丁 v1.2.2
 
 仅更新英文 Steam 国际服：调整私服下发的开发 Error 窗口策略，避免配置警告反复打断操作；不全局吞异常，不改普通失败/断线提示。**国服版仍为 v1.2.1，原便携包不变。**
 
 请先退出私服游戏，再重新启动以加载新适配脚本；不用删除或重导存档。配置缺项和未实现的商店功能并不等于已全部修复。详见 [国际服补丁说明](docs/international-error-overlay.md)。
 
-## 当前基础版本状态（2026-11-25）
+## 历史基础版本状态（2026-11-25）
 
 **当前发布版本为 `v1.2.1`，提供中文国服、英文 Steam 国际服两份独立便携启动器。**
 

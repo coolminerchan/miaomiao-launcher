@@ -6,7 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 ALLOWED = {
     'Launcher.cs', 'SeasideUI.cs', 'RoomManagerForm.cs', 'Strings.cs', 'test_editions.py', 'docs/editions.md', 'launcher.manifest', 'launcher.ico',
-    'build_launcher.ps1', 'test_pcap_streaming.py', 'test_capture_modes.py', 'LocalUidSDK.cpp', 'sdk.def', 'build_sdk.cmd',
+    'build_launcher.ps1', 'test_pcap_streaming.py', 'test_capture_modes.py', 'test_collector_preflight.py', 'test_collector_integration.py', 'test_collector_gui_contract.py', 'LocalUidSDK.cpp', 'sdk.def', 'build_sdk.cmd',
     'World-Control.ps1', 'Lan-Firewall.ps1', 'profile_manager.py',
     'capture_import.py', 'room_gateway.py', 'proto_fields.json',
     'model_schema.json', 'service_runner.py', 'make_junction.ps1',
@@ -17,12 +17,12 @@ ALLOWED = {
     'capture_checklist.py', 'test_capture_checklist.py', 'test_wifi_compat.py',
     'official_launcher.py', 'test_official_launcher.py', 'test_pktmon_encoding.py',
     'capture_zip.py', 'test_capture_zip.py', 'test_capture_completion.py', 'test_import_robust.py', 'schema_restore.py', 'test_bool_fields.py', 'repair_fashion_rows.py',
-    'docs/official-capture.md', 'docs/taptap-private.md', 'docs/international-error-overlay.md',
+    'docs/official-capture.md', 'docs/taptap-private.md', 'docs/international-error-overlay.md', 'docs/android-backup.md', 'docs/collector-1012.md',
     'client_identity.py', 'taptap_private_runner.py', 'taptap_private_agent.js', 'test_taptap_private.py',
     'docs/login-and-data.md', 'docs/release-audit.md', 'docs/channel-login.md', 'preflight.py',
     'backup-tool/1_backup_account.cmd', 'backup-tool/2_backup_gardens.cmd',
     'backup-tool/3_decode_pcap.cmd', 'backup-tool/capture.ps1',
-    'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py',
+    'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py', 'backup-tool/collector_preflight.py', 'backup-tool/exploration.py', 'backup-tool/exploration_catalog.json', 'backup-tool/test_exploration_integration.py',
     'backup-tool/README.md', 'backup-tool/requirements.txt',
     'backup-tool/THIRD-PARTY.txt', 'backup-tool/使用说明.txt',
     'backup-tool/VERSION', 'backup-tool/RELEASE-NOTES.txt', 'backup-tool/pcap_compat.py',

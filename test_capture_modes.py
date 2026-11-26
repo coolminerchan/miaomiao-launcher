@@ -15,6 +15,9 @@ $ast=[Management.Automation.Language.Parser]::ParseFile($CaptureScript,[ref]$nul
 if($errors.Count){throw 'Capture source parse failure'}
 $operation=$ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] } | Select-Object -First 1
 if(-not $operation){throw 'Capture loop unavailable'}
+$guide=$ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Show-CaptureGuide' }
+if(-not $guide){throw 'Capture guide unavailable'}
+Invoke-Expression $guide.Extent.Text
 $script:ops=New-Object 'Collections.Generic.List[string]'
 $script:readCount=0
 $script:sleepCount=0
@@ -30,6 +33,7 @@ function Start-Sleep { param([int]$Seconds,[int]$Milliseconds) $script:sleepCoun
 function Invoke-PacketMonitor {
     param([string[]]$CommandArgs)
     $script:ops.Add(($CommandArgs -join '|'))
+    if($CommandArgs[0] -eq 'stop' -and $Scenario -eq 'stop-error'){throw 'Simulated stop failure'}
     if($CommandArgs[0] -eq 'start'){
         $file=$CommandArgs[[array]::IndexOf($CommandArgs,'--file-name')+1]
         [IO.File]::WriteAllBytes($file,[byte[]](1,2,3))
@@ -41,6 +45,7 @@ function Invoke-PacketMonitor {
     }
 }
 $Mode='Account';$Ports=@(11001);$ServerIps=@();$CleanupOnly=$false
+if($Scenario -eq 'cli-steam'){$Ports=@();$ServerIps=@('150.5.131.114, 150.5.131.115')}
 $AutoStopSeconds=if($Scenario -eq 'cli-auto'){1}else{0}
 $StopFlag=if($Scenario -eq 'gui-stop'){Join-Path $Root 'stop.flag'}else{''}
 $ReadyPath=Join-Path $Root 'ready.json'
@@ -56,7 +61,7 @@ $mutex=New-Object Threading.Mutex($false,('Local\CaptureTest-'+[guid]::NewGuid()
 $ownsMutex=$false;$started=$false;$filtersAdded=$false;$liveWorker=$null
 $failed=$false
 try{Invoke-Expression ($operation.Extent.Text.Replace('$PSScriptRoot','$FixtureScriptRoot'))}catch{
-    if($Scenario -ne 'cli-error'){throw}
+    if($Scenario -notin @('cli-error','stop-error')){throw}
     $failed=$true
 }
 @{operations=@($script:ops.ToArray());readCount=$script:readCount;sleepCount=$script:sleepCount;failed=$failed;pcapExists=(Test-Path $pcap);ready=(Test-Path $ReadyPath)} |
@@ -64,7 +69,7 @@ try{Invoke-Expression ($operation.Extent.Text.Replace('$PSScriptRoot','$FixtureS
 '''
 
 class CaptureModeTests(unittest.TestCase):
-    def check(self,scenario):
+    def check(self,scenario,stop_failure=False):
         if os.name!='nt': self.skipTest('PowerShell fixture requires Windows')
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
@@ -73,9 +78,18 @@ class CaptureModeTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
             data=json.loads((root/'result.json').read_text(encoding='utf-8-sig'))
             operations=data['operations']
-            self.assertEqual(sum(op=='stop' for op in operations),1)
-            self.assertEqual(operations[-1],'remove-filters')
+            self.assertEqual(sum(op=='stop' for op in operations),2 if stop_failure else 1)
+            if stop_failure:
+                self.assertNotIn('remove-filters',operations)
+                self.assertFalse(any(op.startswith('etl2pcap|') for op in operations))
+            else:
+                self.assertEqual(operations[-1],'remove-filters')
             self.assertTrue(data['ready'])
+            ready=json.loads((root/'ready.json').read_text(encoding='utf-8-sig'))
+            self.assertIs(ready['ready'],True)
+            self.assertGreater(ready['pid'],0)
+            self.assertEqual(Path(ready['session']),root/'account_20200101_120000_001')
+            self.assertFalse((root/'ready.json.tmp').exists())
             return data
 
     def test_cli_enter_finishes_one_continuous_trace(self):
@@ -86,6 +100,13 @@ class CaptureModeTests(unittest.TestCase):
         self.assertEqual(len(starts),1)
         self.assertTrue(starts[0].endswith('capture.etl'))
         self.assertTrue(data['pcapExists'])
+
+    def test_steam_addresses_split_without_port_filters(self):
+        data=self.check('cli-steam')
+        filters=[op for op in data['operations'] if op.startswith('filter|add|')]
+        self.assertEqual(filters,[
+            'filter|add|OFBackup_ip_150_5_131_114|-t|TCP|-i|150.5.131.114',
+            'filter|add|OFBackup_ip_150_5_131_115|-t|TCP|-i|150.5.131.115'])
 
     def test_cli_auto_stop_does_not_wait_for_enter(self):
         data=self.check('cli-auto')
@@ -100,6 +121,11 @@ class CaptureModeTests(unittest.TestCase):
         self.assertEqual(len(starts),1)
         self.assertTrue(starts[0].endswith('segment_001.etl'))
         self.assertTrue(data['pcapExists'])
+
+    def test_stop_failure_is_not_swallowed_or_followed_by_filter_cleanup(self):
+        data=self.check('stop-error',stop_failure=True)
+        self.assertTrue(data['failed'])
+        self.assertFalse(data['pcapExists'])
 
     def test_cli_input_failure_still_stops_owned_trace(self):
         data=self.check('cli-error')

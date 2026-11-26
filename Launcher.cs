@@ -15,13 +15,13 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 #if ENGLISH
-[assembly: System.Reflection.AssemblyFileVersion("1.2.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.2.2")]
+[assembly: System.Reflection.AssemblyFileVersion("1.3.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.3.0")]
 [assembly: System.Reflection.AssemblyTitle("OverField International Launcher")]
 [assembly: System.Reflection.AssemblyProduct("OverField International Launcher")]
 #else
-[assembly: System.Reflection.AssemblyFileVersion("1.2.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.2.1")]
+[assembly: System.Reflection.AssemblyFileVersion("1.3.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.3.0")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 #endif
@@ -33,6 +33,24 @@ namespace OverFieldLocal
         [STAThread]
         static void Main(string[] args)
         {
+            // A capture-only elevation restart waits for the original instance
+            // to finish its cleanup before acquiring the same single-instance lock.
+            int elevation = Array.IndexOf(args, "--capture-after-elevation");
+            if (elevation >= 0)
+            {
+                int parentId;
+                if (elevation + 1 >= args.Length || !Int32.TryParse(args[elevation + 1], out parentId) || parentId <= 0 || parentId == Process.GetCurrentProcess().Id) return;
+                try
+                {
+                    using (var parent = Process.GetProcessById(parentId))
+                    {
+                        if (!String.Equals(parent.MainModule.FileName, Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) || !parent.WaitForExit(30000))
+                        { MessageBox.Show(Loc.S("请先退出旧启动器，再以管理员身份重新启动。")); return; }
+                    }
+                }
+                catch (ArgumentException) { } // The original instance already exited.
+                catch (Exception) { MessageBox.Show(Loc.S("无法确认旧启动器已退出，请手动以管理员身份重启。")); return; }
+            }
             bool created;
             // Separate names so the national and the international launcher can
             // both be open at once instead of one focusing the other.
@@ -171,6 +189,7 @@ namespace OverFieldLocal
         public readonly string BaseDir = AppDomain.CurrentDomain.BaseDirectory;
         public string Root = "";
         public string OfficialLauncherPath = "";
+        public volatile bool CaptureStartInFlight;
         public string Python;
         public string Mode = Loc.English ? "steam" : "solo";
         public string HostAddress;
@@ -265,22 +284,25 @@ namespace OverFieldLocal
         {
             try
             {
-                string script = Path.Combine(BaseDir, "official_capture.py");
-                if (!File.Exists(script)) return;
-                if (!Convert.ToBoolean(Official("status")["active"])) return;
-                var arguments = "-X utf8 " + Quote(script) + " stop";
-                using (var process = new Process())
-                {
-                    process.StartInfo = new ProcessStartInfo(Python, arguments)
-                    {
-                        UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = BaseDir,
-                        RedirectStandardOutput = true, RedirectStandardError = true,
-                        StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
-                    };
-                    process.Start();
-                    // stop writes its flag first, so a short wait is enough to be safe.
-                    if (!process.WaitForExit(15000)) { try { process.Kill(); } catch { } }
+                string runtime=Path.Combine(BaseDir,"runtime");
+                bool active=CaptureStartInFlight;
+                string statePath=Path.Combine(runtime,"capture-state.json");
+                if(File.Exists(statePath)) {
+                    try {
+                    var state=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(statePath,Encoding.UTF8));
+                    if(state!=null) {
+                        active=active || (state.ContainsKey("active") && Convert.ToBoolean(state["active"]));
+                        string phase=state.ContainsKey("phase")?Convert.ToString(state["phase"]):"";
+                        active=active || phase=="starting" || phase=="stopping";
+                    }
+                    } catch { active=true; } // Unknown is not an inactive capture.
                 }
+                if(!active)return;
+                Directory.CreateDirectory(runtime);
+                File.WriteAllText(Path.Combine(runtime,"capture-launcher-exit.flag"),"stop",new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(runtime,"capture-stop.flag"),"stop",new UTF8Encoding(false));
+                // The detached worker owns flush/cleanup/export. No cancelled
+                // status subprocess, PID kill, or long wait is needed at exit.
             }
             catch { }
         }
@@ -325,6 +347,7 @@ namespace OverFieldLocal
                 p.StartInfo = new ProcessStartInfo(executable, arguments) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = BaseDir,
                     RedirectStandardOutput = capture, RedirectStandardError = capture };
                 if (capture) { p.StartInfo.StandardOutputEncoding = Encoding.UTF8; p.StartInfo.StandardErrorEncoding = Encoding.UTF8; }
+                linked.Token.ThrowIfCancellationRequested();
                 p.Start();
                 var output = capture ? p.StandardOutput.ReadToEndAsync() : Task.FromResult("");
                 var error = capture ? p.StandardError.ReadToEndAsync() : Task.FromResult("");
@@ -417,9 +440,9 @@ namespace OverFieldLocal
         {
             string script = Path.Combine(BaseDir, "official_capture.py");
             if (!File.Exists(script)) throw new InvalidOperationException(Loc.S("缺少 official_capture.py，请重新解压完整工具包。"));
-            if(action == "start") extra += " --launcher " + Quote(OfficialLauncherPath);
+            if(action == "start") extra += " --launcher " + Quote(OfficialLauncherPath) + " --launcher-managed";
             var arguments = "-X utf8 " + Quote(script) + " " + action + extra;
-            int timeout = action == "stop" ? 1900000 : action == "start" ? 65000 : action == "export-zip" ? 120000 : 15000;
+            int timeout = action == "stop" ? 1900000 : action == "start" ? 180000 : action == "preflight" ? 65000 : action == "export-zip" ? 120000 : 15000;
             var result = ExecuteProcess(Python, arguments, timeout, true, CancellationToken.None);
             if (result.Code != 0)
             {
@@ -487,7 +510,7 @@ namespace OverFieldLocal
         readonly Backend backend = new Backend();
         readonly StatusTile server = new StatusTile(Loc.S("服务端")), gateway = new StatusTile(Loc.S("游戏网关")), proxy = new StatusTile(Loc.S("游戏连接"));
         readonly ActionButton start = new ActionButton(Loc.S("启动游戏  →"), true), services = new ActionButton(Loc.S("启动服务")), stop = new ActionButton(Loc.S("停止服务")), browse = new ActionButton(Loc.S("更改目录"));
-        readonly ActionButton captureStart = new ActionButton(Loc.S("开始采集")), captureStop = new ActionButton(Loc.S("结束采集")), captureSaveZip = new ActionButton(Loc.S("保存账号 ZIP"));
+        readonly ActionButton capturePreflight = new ActionButton(Loc.S("预检查")), captureStart = new ActionButton(Loc.S("开始采集")), captureStop = new ActionButton(Loc.S("结束采集")), captureSaveZip = new ActionButton(Loc.S("保存账号 ZIP"));
         string lastCaptureZip = "";
         readonly Label captureHint = new Label();
         readonly TextBox officialLauncherPath = new TextBox();
@@ -536,6 +559,18 @@ namespace OverFieldLocal
             steamMode.Click += async delegate { await SwitchMode("steam"); };
             captureMode.Click += async delegate { ShowCapturePage(true); if(!uiPreview) { await RefreshCaptureState(); await RefreshCaptureProgress(); } };
             officialBrowse.Click += async delegate { await ChooseOfficialLauncher(); };
+            capturePreflight.Click += async delegate {
+                if(busy || captureRunning || uiPreview) return;
+                SetBusy(true, Loc.S("正在预检查采集环境"));
+                try {
+                    var report=await Task.Run(() => backend.Official("preflight"));
+                    string detail=PreflightText(report);
+                    Append(detail);
+                    MessageBox.Show(this,PreflightText(report,true),Loc.S("采集预检查"),MessageBoxButtons.OK,
+                        report.ContainsKey("ok") && Convert.ToBoolean(report["ok"]) ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                } catch(Exception error) { Append(error.Message);MessageBox.Show(this,error.Message,Loc.S("采集预检查")); }
+                finally { SetBusy(false, ""); }
+            };
             captureStop.Enabled = false;
             captureSaveZip.Enabled = false;
             captureSaveZip.Click += async delegate {
@@ -552,10 +587,30 @@ namespace OverFieldLocal
             {
                 if (busy || captureRunning) return;
                 if(String.IsNullOrWhiteSpace(backend.OfficialLauncherPath) && !await ChooseOfficialLauncher()) return;
-                SetBusy(true, Loc.S("正在确认抓包就绪并启动公服"));
+                SetBusy(true, Loc.S("正在预检查采集环境"));
                 try
                 {
+                    var report = await Task.Run(() => backend.Official("preflight"));
+                    if(closing)return;
+                    Append(PreflightText(report));
+                    if(report.ContainsKey("needsElevation") && Convert.ToBoolean(report["needsElevation"]))
+                    {
+                        backend.Save();
+                        Append(Loc.S("正在申请管理员权限；取消不会启动游戏或采集。"));
+                        using(var elevated=Process.Start(new ProcessStartInfo(Application.ExecutablePath,
+                            "--capture-after-elevation " + Process.GetCurrentProcess().Id.ToString()) { UseShellExecute=true,Verb="runas" }))
+                        { if(elevated==null) throw new InvalidOperationException(Loc.S("未启动管理员实例，请重试。")); }
+                        Close(); return;
+                    }
+                    if(!report.ContainsKey("ok") || !Convert.ToBoolean(report["ok"]))
+                    { captureHint.Text=Loc.S("预检查未通过，请按检查结果处理后重试。");MessageBox.Show(this,PreflightText(report,true),Loc.S("采集预检查"));return; }
+                    SetBusy(true, Loc.S("正在确认抓包就绪并启动公服"));
+                    string exitFlag=Path.Combine(backend.BaseDir,"runtime","capture-launcher-exit.flag");
+                    if(File.Exists(exitFlag))File.Delete(exitFlag);
+                    backend.CaptureStartInFlight=true;
                     var result = await Task.Run(() => backend.Official("start"));
+                    backend.CaptureStartInFlight=false;
+                    if(closing)return;
                     captureRunning = true; lastCaptureZip = "";
                     bool steam = result.ContainsKey("officialKind") && Convert.ToString(result["officialKind"])=="steam";
                     Append(steam ? Loc.S("抓包已就绪，正在通过 Steam 启动客户端。公服路径未使用私服副本或本地UID。") : Loc.S("抓包已就绪，已启动配置的公服启动器。公服路径未使用私服副本或本地UID。"));
@@ -565,7 +620,7 @@ namespace OverFieldLocal
                     captureHint.Text = Loc.S("采集中：公服启动器已打开，请正常登录并加载要保存的界面，完成后点「结束采集」。");
                 }
                 catch (Exception error) { Append(error.Message); captureHint.Text = error.Message; }
-                finally { SetBusy(false, ""); }
+                finally { backend.CaptureStartInFlight=false; SetBusy(false, ""); }
                 await RefreshCaptureState();
             };
             captureStop.Click += async delegate
@@ -585,6 +640,17 @@ namespace OverFieldLocal
                         return;
                     }
                     lastCaptureZip = zip;
+                    if(captured.ContainsKey("quality")) {
+                        var quality=captured["quality"] as Dictionary<string,object>;
+                        if(quality!=null && quality.ContainsKey("successful_decode_count")) Append(Loc.S("成功解码响应/消息数：")+Convert.ToString(quality["successful_decode_count"]));
+                        if(quality!=null && quality.ContainsKey("trailing_bytes_count") && Convert.ToInt64(quality["trailing_bytes_count"])>0) Append(Loc.S("发现残缺流尾；请查看采集报告，不能视为完整备份。"));
+                    }
+                    if(captured.ContainsKey("exploration")) {
+                        var exploration=captured["exploration"] as Dictionary<string,object>;
+                        if(exploration!=null) Append(exploration.ContainsKey("evidence_available") && Convert.ToBoolean(exploration["evidence_available"])
+                            ? Loc.S("探索观测报告已加入账号ZIP；总量未验证，不表示全图完整。")
+                            : Loc.S("探索报告已生成，但尚未收到有效探索证据；未知不当0。"));
+                    }
                     if(!await SaveCaptureZip(zip)) return;
                     uint loginUid = (uint)uidBox.Value;
                     var review = await Task.Run(() => backend.OfficialImport("plan", zip, loginUid, false));
@@ -666,6 +732,8 @@ namespace OverFieldLocal
                         dialog.ShowDialog(this);
                     }
                 }
+                if (Array.IndexOf(args,"--capture-after-elevation")>=0 && !closing)
+                { ShowCapturePage(true);captureStart.PerformClick(); }
                 if (smokePath != null) { await Task.Delay(600); SaveSmoke(); }
             };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
@@ -682,6 +750,24 @@ namespace OverFieldLocal
                     finally { Cursor = Cursors.Default; }
                 }
             };
+        }
+        string PreflightText(Dictionary<string,object> report, bool compact = false)
+        {
+            var text=new StringBuilder();
+            bool ready=report.ContainsKey("ok") && Convert.ToBoolean(report["ok"]);
+            bool elevate=report.ContainsKey("needsElevation") && Convert.ToBoolean(report["needsElevation"]);
+            text.AppendLine(ready ? Loc.S("采集依赖检查通过。") : elevate ? Loc.S("需要管理员确认；提升权限后会重新检查。") : Loc.S("预检查未通过，请按检查结果处理后重试。"));
+            if(report.ContainsKey("checks")) foreach(object value in (System.Collections.IEnumerable)report["checks"])
+            {
+                var row=value as Dictionary<string,object>;if(row==null)continue;
+                string state=row.ContainsKey("state")?Convert.ToString(row["state"]):"unknown";
+                string label=state=="ok"?Loc.S("通过"):state=="warning"?Loc.S("注意"):state=="error"?Loc.S("失败"):Loc.S("未确认");
+                string key=Loc.English && row.ContainsKey("messageEn")?"messageEn":"message";
+                string message=row.ContainsKey(key)?Convert.ToString(row[key]):"";
+                if(compact){message=message.Replace("\r","").Split('\n')[0];if(message.Length>240)message=message.Substring(0,240)+"…";}
+                text.AppendLine("["+label+"] "+message);
+            }
+            return text.ToString();
         }
         Label LabelText(string text, float size, Color color, FontStyle style = FontStyle.Regular)
         {
@@ -850,6 +936,7 @@ namespace OverFieldLocal
                 lastCaptureZip=File.Exists(zip)?zip:"";
                 captureSaveZip.Enabled=!captureRunning && File.Exists(lastCaptureZip);
                 officialBrowse.Enabled=!captureRunning;
+                capturePreflight.Enabled=!captureRunning;
                 captureStart.Enabled=!captureRunning;
                 captureStop.Enabled=captureRunning;
             }
@@ -965,15 +1052,16 @@ namespace OverFieldLocal
         void SetBusy(bool value, string text)
         {
             if (closing) return;
-            busy = value; start.Enabled = services.Enabled = !value; stop.Enabled = true;
-            soloMode.Enabled=hostMode.Enabled=importData.Enabled=backupData.Enabled=!value;
+            busy = value; start.Enabled = services.Enabled = !value; stop.Enabled = !value || operationCancellation != null;
+            soloMode.Enabled=steamMode.Enabled=hostMode.Enabled=importData.Enabled=backupData.Enabled=!value;
             captureMode.Enabled = !value;
             officialBrowse.Enabled = !value && !captureRunning;
+            capturePreflight.Enabled = !value && !captureRunning;
             captureStart.Enabled = !value && !captureRunning;
             captureStop.Enabled = !value && captureRunning;
             captureSaveZip.Enabled = !value && !captureRunning && File.Exists(lastCaptureZip);
             uidBox.Enabled=!value && (lastStatus==null || !lastStatus.ClientRunning); hostBox.Enabled=!value && backend.Mode=="host" && (lastStatus==null || String.IsNullOrEmpty(lastStatus.RuntimeMode)); firewall.Enabled=!value && backend.Mode=="host";
-            stop.Text = value ? Loc.S("取消操作") : Loc.S("停止服务");
+            stop.Text = value ? (operationCancellation != null ? Loc.S("取消操作") : Loc.S("正在处理…")) : Loc.S("停止服务");
             browse.Enabled = !value && lastStatus != null && !lastStatus.ServerRunning && !lastStatus.ProxyRunning;
             if (value) { badge.Text = text; badge.ForeColor = Theme.Accent; start.Text = Loc.S("正在处理…"); }
             else start.Text = backend.Mode=="host" ? Loc.S("发布局域网服务  →") : lastStatus != null && lastStatus.ClientRunning ? Loc.S("返回游戏  →") : Loc.S("启动单机游戏  →");

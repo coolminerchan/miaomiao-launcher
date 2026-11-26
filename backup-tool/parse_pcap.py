@@ -42,6 +42,20 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import net_pb2  # type: ignore  # noqa: E402
 from pcap_compat import prepare_capture  # noqa: E402
+from exploration import Exploration, render_report  # noqa: E402
+
+MAX_DECOMPRESSED_BODY = 32 * 1024 * 1024
+MAX_STREAM_DECOMPRESSED = 256 * 1024 * 1024
+
+
+def snappy_declared_size(data: bytes) -> int:
+    """Read Raw Snappy's length varint before allocating output."""
+    value = 0
+    for index, byte in enumerate(data[:5]):
+        value |= (byte & 127) << (7 * index)
+        if not byte & 128:
+            return value
+    raise ValueError("invalid_snappy_length")
 
 HEADER_STRUCT = struct.Struct(">H")
 GAME_PORTS = {"11001", "11002", "11003", "11004", "21001", "21002"}
@@ -179,6 +193,7 @@ def parse_game_stream(data: bytes) -> Tuple[List[dict], int]:
     packets: List[dict] = []
     pos = 0
     total = len(data)
+    decompressed_bytes = 0
 
     while pos + 2 <= total:
         head_len = HEADER_STRUCT.unpack_from(data, pos)[0]
@@ -206,7 +221,13 @@ def parse_game_stream(data: bytes) -> Tuple[List[dict], int]:
         body = raw_body
         if head.flag == 1:
             try:
+                declared = snappy_declared_size(raw_body)
+                if declared > MAX_DECOMPRESSED_BODY or decompressed_bytes + declared > MAX_STREAM_DECOMPRESSED:
+                    raise ValueError("snappy_decompression_budget_exceeded")
+                decompressed_bytes += declared
                 body = bytes(cramjam.snappy.decompress_raw(raw_body))
+                if len(body) != declared:
+                    raise ValueError("snappy_length_mismatch")
             except Exception as e:
                 decompress_err = str(e)
 
@@ -354,6 +375,10 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     omitted_login_requests = 0
     sanitized_login_responses = 0
     msg_names_seen: Counter = Counter()
+    decoded_names_seen: Counter = Counter()
+    decoded_s2c_names_seen: Counter = Counter()
+    trailing_streams: List[dict] = []
+    exploration = Exploration(net_pb2)
     unknown_ids: Counter = Counter()
     decode_errors: List[dict] = []
     observed_player_uids: set[int] = set()
@@ -386,7 +411,11 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         for dir_label, payload in directions:
             if not payload:
                 continue
-            pkts, _ = parse_game_stream(payload)
+            pkts, remaining = parse_game_stream(payload)
+            if remaining:
+                trailing_streams.append({"stream_id": sid, "direction": dir_label,
+                                         "remaining_bytes": remaining,
+                                         "reason": "incomplete_or_unrecognized_tail"})
             if not pkts:
                 continue
             stream_pkt_total += len(pkts)
@@ -442,6 +471,11 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
                 elif msg_id in GARDEN_SCENE_NOTICE_IDS:
                     garden_packets[current_garden_uid].append(stem)
                 if decoded is not None:
+                    decoded_names_seen[msg_name] += 1
+                    if dir_label == "s2c":
+                        decoded_s2c_names_seen[msg_name] += 1
+                        exploration.add(msg_name, body, {"stream_id": sid, "direction": dir_label,
+                                                       "seq": global_seq, "packet_stem": stem})
                     (json_dir / f"{stem}.json").write_text(
                         json.dumps(decoded, ensure_ascii=False, indent=2), encoding="utf-8"
                     )
@@ -480,7 +514,23 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         garden_layouts.pop(account_uid, None)
         write_garden_backups(out_dir / "gardens", garden_layouts, player_names, separated)
 
+    exploration_summary = exploration.summary(player_uids)
+    exploration_path = out_dir / "exploration.json"
+    exploration_text_path = out_dir / "exploration.txt"
+    exploration_path.write_text(json.dumps(exploration_summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    exploration_text_path.write_text(render_report(exploration_summary), encoding="utf-8")
+
     summary = {
+        "exploration": exploration_summary,
+        "exploration_report": exploration_text_path.name,
+        "exploration_reports": [exploration_path.name, exploration_text_path.name],
+        "successful_decode_count": sum(decoded_names_seen.values()),
+        "successful_message_counts": dict(decoded_names_seen),
+        "successful_s2c_message_counts": dict(decoded_s2c_names_seen),
+        "trailing_streams": trailing_streams,
+        "trailing_bytes_count": sum(row["remaining_bytes"] for row in trailing_streams),
+        "decompression_budget": {"per_body_bytes": MAX_DECOMPRESSED_BODY,
+                                 "per_direction_stream_bytes": MAX_STREAM_DECOMPRESSED},
         "pcap_file": str(pcap_path),
         "total_packets": global_seq,
         "game_streams": stream_summaries,
@@ -501,7 +551,8 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         summary["account_zip"] = account_zip.name
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if account_uid is not None:
-        files = [summary_path, *sorted(raw_dir.glob("*.bin")), *sorted(json_dir.glob("*.json"))]
+        files = [summary_path, exploration_path, exploration_text_path,
+                 *sorted(raw_dir.glob("*.bin")), *sorted(json_dir.glob("*.json"))]
         write_zip(account_zip, files)
         print(f"已保存账号 ZIP {account_zip}")
 
@@ -528,7 +579,7 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
 
     print("\n【关键玩家数据核对清单】")
     for label, targets in CHECKLIST_GROUPS:
-        hit = {t: msg_names_seen[t] for t in targets if msg_names_seen[t] > 0}
+        hit = {t: decoded_s2c_names_seen[t] for t in targets if decoded_s2c_names_seen[t] > 0}
         if hit:
             detail = ", ".join(f"{k} x{v}" for k, v in hit.items())
             print(f"  [OK] {label}: {detail}")

@@ -34,7 +34,7 @@ $pktmon = Join-Path $env:SystemRoot 'System32\PktMon.exe'
 $programs = if ($CleanupOnly) { $pktmon } else { $python, $tshark, $pktmon }
 foreach ($program in $programs) {
     if (-not (Test-Path -LiteralPath $program -PathType Leaf)) {
-        throw "找不到 $program 。请先完整解压工具包，并在支持 PktMon 的 Windows 上运行。"
+        throw "工具文件不完整，无法启动：找不到 $program 。请把压缩包全部解压到独立文件夹，保留 tools 目录；也可通过 PythonExe/TSharkExe 指定已有依赖。PktMon 需要受支持的 Windows。不会自动安装或下载。"
     }
 }
 if (-not $CleanupOnly) {
@@ -42,6 +42,24 @@ if (-not $CleanupOnly) {
     if ($LASTEXITCODE -ne 0) { throw '内置 Python 依赖加载失败，请重新解压工具包。' }
     & $tshark --version | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '内置 TShark 无法启动，请检查是否完整解压。' }
+}
+
+function Show-CaptureGuide {
+    Write-Host '新手三步：①完整解压工具 ②看到「抓包已开始」再登录所选公服 ③完成浏览后结束并等待导出。'
+    Write-Host '账号采集请先关闭私服转发工具，再退出并重启所选客户端；不要在压缩包预览目录中运行。'
+    if ($Mode -eq 'Account') {
+        Write-Host '登录进入场景后，依次打开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
+        Write-Host '家园预设请逐套切换并进入家园，等家具加载；未浏览的数据可能不会发送。'
+    } else {
+        Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
+    }
+    if ($StopFlag) {
+        Write-Host 'GUI 模式请使用启动器的结束采集按钮；不要直接关闭窗口。'
+    } else {
+        Write-Host 'CLI 模式请回到此窗口按回车结束；结束后需等待转换与导出完成。'
+    }
+    Write-Host "本轮结果目录：$sessionPath"
+    Write-Host '采集文件和导出结果含账号隐私；不要公开分享原始抓包或 ZIP。'
 }
 
 function Invoke-PacketMonitor([string[]]$CommandArgs) {
@@ -167,13 +185,7 @@ try {
             Move-Item -LiteralPath ($ReadyPath + '.tmp') -Destination $ReadyPath -Force
         }
         Write-Host "抓包已开始。输出目录 $sessionPath"
-        if ($Mode -eq 'Account') {
-            Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
-            Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
-            Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
-        } else {
-            Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
-        }
+        Show-CaptureGuide
         if ($AutoStopSeconds -gt 0) {
             Start-Sleep -Seconds $AutoStopSeconds
         } else {
@@ -212,13 +224,7 @@ try {
                         $liveWorker = Start-Process -FilePath $python -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $liveDir 'observer.log') -RedirectStandardError (Join-Path $liveDir 'observer.err.log')
                     } catch { Write-Host '实时清单暂不可用，结束后仍会核对完整产物。' }
                 }
-                if ($Mode -eq 'Account') {
-                    Write-Host '请退出再启动自己的官服客户端，登录并进入场景。'
-                    Write-Host '依次点开角色与穿搭、背包、装备、任务、宠物、家园、好友、邮件、抽卡记录和图鉴。'
-                    Write-Host '要保存某套家园预设，请切到对应预设并进入家园，等家具加载。'
-                } else {
-                    Write-Host '请拜访要保存的好友家园，等家具加载出来后再进入下一家。'
-                }
+                Show-CaptureGuide
             }
             $offset = 0
             while ($offset -lt $segmentSeconds) {
@@ -269,4 +275,8 @@ $env:PYTHONUTF8 = '1'
 if ($LASTEXITCODE -ne 0) {
     throw "解包失败。可从 $pcap 重新解包。"
 }
-Write-Host "已保存到 $sessionPath"
+Write-Host "采集和导出已完成。结果目录：$sessionPath"
+Write-Host "原始抓包：$pcap"
+Write-Host "解析结果：$export"
+Write-Host '请在启动器的结果页面查看/打开本轮目录或导出的 ZIP；CLI 本身不会额外打包 ZIP。'
+Write-Host '若数据不全，可保留原始抓包后重新解析，或重新采集并补齐页面浏览。'
