@@ -279,6 +279,82 @@ def build_player(main, entries, report=None):
             'scene': {'worldLevel': as_int(main.get('world_level')), 'cur_pet_instance_id': as_int(main.get('pet_instance_id'))}}
 
 
+def garden_vector(value):
+    """The server stores Vector3 as plain {"x","y","z"} int32 (no omitempty)."""
+    value = value if isinstance(value, dict) else {}
+    return {axis: as_int(value.get(axis)) for axis in ('x', 'y', 'z')}
+
+
+def build_garden(main, entries):
+    """Build the of_home row the Lolo server reads when a player enters their garden.
+
+    The server keeps the garden in its own table: of_home.garden_furniture_info_map
+    holds a sonic-serialised map[int64]*FurnitureDetailsInfo, and
+    placed_character_map a serialised []*ScenePlacedCharacter. The import used to
+    skip this table entirely, so every imported account showed an empty garden no
+    matter how much furniture the capture carried.
+    """
+    uid = int(main.get('player_label') or main['player_id'])
+    internal = int(main.get('player_id') or uid)
+
+    # The player's own garden is the 9999 snapshot whose channel is this account.
+    best = None
+    for notice in entries.get('SceneDataNotice', []):
+        data = (notice or {}).get('data')
+        if not isinstance(data, dict) or as_int(data.get('scene_id')) != 9999:
+            continue
+        channel = as_int(data.get('channel_id'))
+        label = as_int(data.get('channel_label'))
+        if uid not in (channel, label) and internal not in (channel, label):
+            continue
+        garden = data.get('scene_garden_data')
+        garden = garden if isinstance(garden, dict) else {}
+        furniture = garden.get('garden_furniture_info_map')
+        furniture = furniture if isinstance(furniture, dict) else {}
+        if best is None or len(furniture) > len(best[1]):
+            best = (data, furniture, garden)
+
+    if best is None:
+        return None
+    data, furniture, garden = best
+
+    items = {}
+    for key, detail in furniture.items():
+        if not isinstance(detail, dict):
+            continue
+        furniture_id = as_int(detail.get('furniture_id'), as_int(key))
+        if furniture_id <= 0:
+            continue
+        stored = {
+            'furnitureId': furniture_id,
+            'furnitureItemId': as_int(detail.get('furniture_item_id')),
+            'pos': garden_vector(detail.get('pos')),
+            'rotation': garden_vector(detail.get('rotation')),
+        }
+        layer = as_int(detail.get('layer_num'))
+        if layer:
+            stored['layerNum'] = layer
+        items[str(furniture_id)] = stored
+
+    placed = []
+    for character in as_list(data.get('placed_characters')):
+        if isinstance(character, dict):
+            placed.append(model('ScenePlacedCharacter', character) if SCHEMA['models'].get('ScenePlacedCharacter') else character)
+
+    return {
+        'scene_id': 9999,
+        'garden_name': garden.get('garden_name') or '',
+        'likes_num': as_int(garden.get('likes_num')),
+        'access_player_num': as_int(garden.get('access_player_num')),
+        'left_like_num': as_int(garden.get('left_like_num')),
+        'is_open': 1 if garden.get('is_open') else 0,
+        'password': garden.get('password') or '',
+        'password_expire_time': as_int(garden.get('password_expire_time')),
+        'furniture': items,
+        'placed': placed,
+    }
+
+
 def import_capture(path, profile, expected_uid, replace=False, allow_incomplete=False):
     main, entries = read_capture(path)
     uid = int(main.get('player_label') or main['player_id'])
@@ -314,6 +390,32 @@ def import_capture(path, profile, expected_uid, replace=False, allow_incomplete=
         names=list(values)
         update=','.join(f'{key}=excluded.{key}' for key in names if key!='user_id')
         connection.execute(f'INSERT INTO of_game_basic({",".join(names)}) VALUES({",".join("?" for _ in names)}) ON CONFLICT(user_id) DO UPDATE SET {update}', list(values.values()))
+        garden = build_garden(main, entries)
+        if garden is not None:
+            home_columns = {row[1] for row in connection.execute('PRAGMA table_info(of_home)')}
+            if {'user_id', 'scene_id', 'garden_furniture_info_map'} <= home_columns:
+                row = {
+                    'user_id': uid,
+                    'scene_id': 9999,
+                    'garden_name': garden['garden_name'],
+                    'likes_num': garden['likes_num'],
+                    'access_player_num': garden['access_player_num'],
+                    'left_like_num': garden['left_like_num'],
+                    'is_open': garden['is_open'],
+                    'password': garden['password'],
+                    'password_expire_time': garden['password_expire_time'],
+                    # The server serialises with sonic and reads the column back into
+                    # map[int64]*FurnitureDetailsInfo, so this must be JSON, not protobuf.
+                    'garden_furniture_info_map': json.dumps(garden['furniture'], ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
+                    'placed_character_map': json.dumps(garden['placed'], ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
+                }
+                row = {key: value for key, value in row.items() if key in home_columns}
+                keys = list(row)
+                assignments = ','.join(f'{key}=excluded.{key}' for key in keys if key not in ('user_id', 'scene_id'))
+                connection.execute(
+                    f'INSERT INTO of_home({",".join(keys)}) VALUES({",".join("?" for _ in keys)}) '
+                    f'ON CONFLICT(user_id,scene_id) DO UPDATE SET {assignments}',
+                    list(row.values()))
     directory = profile / 'accounts' / str(uid)
     directory.mkdir(parents=True, exist_ok=True)
     write_json(directory / 'main-data.json', main)
