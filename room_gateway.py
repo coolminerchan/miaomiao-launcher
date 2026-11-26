@@ -317,10 +317,13 @@ class Manager:
                     raw,head,body=await read(reader,'client')
                     if head[2][0]==1201:
                         states['client']['phase']='authorize'
-                        parsed=fields(decode_body(head,body));rid=parsed.get(PROTO['ChangeSceneChannelReq']['ChannelLabel'],[session['room']])[-1]
-                        if type(rid) is not int:raise ValueError('Invalid room ID')
+                        parsed=fields(decode_body(head,body));labels=parsed.get(PROTO['ChangeSceneChannelReq']['ChannelLabel'],[session['room']])
+                        if any(type(value) is not int or not 0<=value<=0xffffffff for value in labels):raise ValueError('Invalid room ID')
+                        rid=labels[-1]
                         room=next((r for r in self.rooms if r['id']==rid),None)
-                        if not room or room['closed'] or (sum(s.get('room')==rid for s in self.sessions.values())>=room['capacity'] and session['room']!=rid):raise ValueError('Room is unavailable')
+                        # Unknown channels belong to the backend; register them only
+                        # after a server observation, not by trusting this request.
+                        if room and (room['closed'] or (sum(s.get('room')==rid for s in self.sessions.values())>=room['capacity'] and session['room']!=rid)):raise ValueError('Room is unavailable')
                     async with session['lock']:await forward(server,raw,'client')
             async def from_server():
                 while True:

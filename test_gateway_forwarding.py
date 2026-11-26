@@ -35,11 +35,12 @@ class Writer:
 
 
 class ForwardingTests(unittest.IsolatedAsyncioTestCase):
-    async def exercise(self, response=b'', first=None, extra=b'', client_eof=False, writer_error=None, decode_error=None, other_sessions=None):
+    async def exercise(self, response=b'', first=None, extra=b'', client_eof=False, writer_error=None, decode_error=None, other_sessions=None, initial_room=None, respond_after_request=False):
         first = packet(1001, blob(2, b'1')) if first is None else first
         client_reader = asyncio.StreamReader(); client_reader.feed_data(first + extra)
         if client_eof: client_reader.feed_eof()
-        upstream = asyncio.StreamReader(); upstream.feed_data(response)
+        upstream = asyncio.StreamReader()
+        if not respond_after_request: upstream.feed_data(response)
         # Keep server alive in client-policy cases so the client task determines exit.
         if not extra: upstream.feed_eof()
         client_writer, server_writer = Writer(writer_error), Writer()
@@ -50,6 +51,13 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
                      {'id': 3, 'closed': False, 'capacity': 1, 'scene': 0}]
         mgr.account = lambda value: (1, 'synthetic-secret-name')
         mgr.move = AsyncMock(); mgr.save = lambda: None
+        original_write = server_writer.write
+        def server_write(data):
+            original_write(data)
+            if data == first and initial_room is not None: mgr.sessions[1]['room'] = initial_room
+            if respond_after_request and data == extra:
+                upstream.feed_data(response); upstream.feed_eof()
+        server_writer.write = server_write
         open_mock = AsyncMock(return_value=(upstream, server_writer))
         output = io.StringIO()
         actual_decode = namespace['decode_observation']
@@ -136,7 +144,6 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_room_policy_fail_closed(self):
         for request, sessions in ((packet(1201, integer(2, 2)), {}),
-                                  (packet(1201, integer(2, 999)), {}),
                                   (packet(1201, integer(2, 3)), {99: {'room': 3}}),
                                   (packet(1201, b'\x00'), {}),
                                   (raw_packet(1201, b'\x04\x00', 1), {})):
@@ -144,6 +151,52 @@ class ForwardingTests(unittest.IsolatedAsyncioTestCase):
                 _, server, _, logs, _ = await self.exercise(extra=request, other_sessions=sessions)
                 self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')))
                 self.assertTrue(any(v['event'] == 'connection-error' and v['direction'] == 'client' and v['phase'] == 'authorize' for v in logs))
+
+    async def test_unknown_channel_relays_without_premature_registration(self):
+        for rid in (0, 999, 0xffffffff):
+            with self.subTest(rid=rid):
+                request = packet(1201, integer(2, rid))
+                _, server, mgr, logs, _ = await self.exercise(extra=request, client_eof=True)
+                self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')) + request)
+                self.assertFalse(any(v['event'] == 'connection-error' for v in logs))
+                self.assertEqual([r['id'] for r in mgr.rooms], [1, 2, 3])
+
+    async def test_unknown_channel_registers_only_after_server_response(self):
+        request = packet(1201, integer(2, 999))
+        for scene in (None, 7):
+            with self.subTest(scene=scene):
+                response = packet(1202, integer(1, 1) + (integer(2, scene) if scene is not None else b'') + integer(3, 999))
+                client, server, mgr, logs, _ = await self.exercise(response=response, extra=request, respond_after_request=True)
+                self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')) + request)
+                self.assertEqual(bytes(client.data), response)
+                self.assertFalse(any(v['event'] == 'connection-error' for v in logs))
+                registered = next(room for room in mgr.rooms if room['id'] == 999)
+                self.assertEqual(registered['scene'], scene if scene is not None else 0)
+                self.assertEqual(registered['capacity'], 50)
+                self.assertFalse(registered['closed'])
+
+    async def test_current_full_channel_reentry_is_allowed(self):
+        request = packet(1201, integer(2, 3))
+        _, server, _, logs, _ = await self.exercise(extra=request, client_eof=True, initial_room=3)
+        self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')) + request)
+        self.assertFalse(any(v['event'] == 'connection-error' for v in logs))
+
+    async def test_closed_current_channel_is_still_rejected(self):
+        request = packet(1201, integer(2, 2))
+        _, server, _, logs, _ = await self.exercise(extra=request, initial_room=2)
+        self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')))
+        self.assertTrue(any(v['event'] == 'connection-error' and v['phase'] == 'authorize' for v in logs))
+
+    async def test_channel_label_wrong_wire_or_uint32_overflow_is_rejected(self):
+        bodies = [blob(2, b'wrong-wire'), integer(2, 0x100000000), integer(2, 0xffffffffffffffff),
+                  integer(2, 999) + b'\xa3\x06\xa4\x06',
+                  integer(2, 0x100000000) + integer(2, 999),
+                  blob(2, b'wrong-wire') + integer(2, 999)]
+        for body in bodies:
+            with self.subTest(body=body):
+                _, server, _, logs, _ = await self.exercise(extra=packet(1201, body))
+                self.assertEqual(bytes(server.data), packet(1001, blob(2, b'1')))
+                self.assertTrue(any(v['event'] == 'connection-error' and v['phase'] == 'authorize' and v['reason'] == 'ValueError' for v in logs))
 
     async def test_header_and_body_bounds_remain_rejected(self):
         invalid = [b'\x00\x00', struct.pack('>H', 4097), raw_packet(1004, b'')]
