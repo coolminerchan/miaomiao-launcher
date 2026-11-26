@@ -341,6 +341,35 @@ class ApplyTests(unittest.TestCase):
         with patch.object(apply, '_processes', side_effect=RuntimeError('CIM unavailable')):
             self.assertEqual(apply.find_busy(self.f.root)[0]['reason'], 'unknown')
 
+    def test_edition_does_not_change_launcher_file_name(self):
+        """The portable EN package ships OverFieldLauncher.exe, not -EN.exe.
+
+        Requiring the -EN name for edition EN rejected every real EN install at
+        handoff, and looked for a nonexistent file when restarting after apply.
+        """
+        self.addCleanup(self.tmp.cleanup) if hasattr(self, 'tmp') else None
+        tmp = tempfile.TemporaryDirectory(prefix='synthetic-en-')
+        self.addCleanup(tmp.cleanup)
+        f = Fixture(tmp.name, edition='EN')
+        # Only the plain name exists, exactly like the real portable package.
+        exe = f.root / 'OverFieldLauncher.exe'
+        exe.write_bytes(b'synthetic-not-executable')
+        self.assertFalse((f.root / 'OverFieldLauncher-EN.exe').exists())
+        row = {'ProcessId': 123, 'ExecutablePath': str(exe), 'CreationDate': 'unique-start'}
+        with patch.object(apply, '_processes', return_value=[row]), \
+                patch.object(apply.subprocess, 'Popen') as popen:
+            popen.return_value.pid = 456
+            result = apply.launch_update(f.root, f.stage, 'EN', 123, True,
+                                         verifier=f.verifier, busy_finder=idle)
+            self.assertEqual(result['status'], 'launched', result)
+        # And apply-with-restart must relaunch the file that actually exists.
+        with patch.object(apply.subprocess, 'Popen') as popen:
+            result = f.run(restart=True)
+            self.assertEqual(result['status'], 'applied', result)
+            self.assertTrue(result.get('restarted'), result)
+            launched = [c.args[0] for c in popen.call_args_list if isinstance(c.args[0], list)]
+            self.assertEqual(launched, [[str(exe)]])
+
     def test_failure_and_child_revalidation_restart_old_edition(self):
         exe = self.f.root / 'OverFieldLauncher.exe'
         exe.write_bytes(b'synthetic-not-executable')

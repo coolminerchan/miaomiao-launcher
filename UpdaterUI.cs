@@ -153,6 +153,37 @@ namespace OverFieldLocal
                 !lastStatus.ServerRunning && !lastStatus.ClientRunning && !lastStatus.GatewayListening &&
                 !lastStatus.ProxyRunning && !lastStatus.ProxyListening && !lastStatus.HttpListening;
         }
+        /// <summary>
+        /// Real user activity that must stop the countdown: a game, services, a proxy
+        /// listener or an active capture. Our own 5s status poll is NOT user activity.
+        /// </summary>
+        bool UpdaterExternalActivity()
+        {
+            return captureRunning || lastStatus == null || lastStatusError != null ||
+                lastStatus.ServerRunning || lastStatus.ClientRunning || lastStatus.GatewayListening ||
+                lastStatus.ProxyRunning || lastStatus.ProxyListening || lastStatus.HttpListening;
+        }
+        /// <summary>
+        /// Work this window is doing right now (a status poll, a busy operation).
+        /// It must pause the countdown for one tick, never restart it: the status
+        /// poll runs every 5 seconds, so restarting would keep the countdown pinned.
+        /// </summary>
+        bool UpdaterInternalBusy()
+        {
+            return busy || checking;
+        }
+        /// <summary>
+        /// Pure countdown step, so the launch decision can be tested without a window.
+        /// externalActivity cancels (-1); internalBusy freezes the remaining value;
+        /// a finished countdown returns 0 exactly once and asks the caller to launch.
+        /// </summary>
+        internal static int UpdaterCountdownStep(bool externalActivity, bool internalBusy, int countdown)
+        {
+            if (externalActivity) return -1;
+            if (internalBusy) return countdown;
+            if (countdown < 0) return -1;
+            return countdown - 1 < 0 ? 0 : countdown - 1;
+        }
         async Task TickUpdater()
         {
             if (!updaterAllowed || updaterWorking || closing || updaterHandoff) return;
@@ -172,19 +203,29 @@ namespace OverFieldLocal
                 return;
             }
             if (DateTime.UtcNow < updaterPostpone) return;
-            if (!UpdaterLocallyIdle()) { updaterCountdown = -1; SetUpdaterStatus(recovery ? UText("更新需要恢复 · 等待游戏 / 服务 / 采集空闲", "Update recovery needed · Waiting for game / services / capture") : UText("更新已下载 · 等待游戏 / 服务 / 采集空闲", "Downloaded · Waiting for game / services / capture to finish")); return; }
+            // Real user activity cancels the countdown. Our own 5s status poll does not:
+            // resetting on it made the countdown restart at 10 before it ever reached 0.
+            bool external = UpdaterExternalActivity(), internalBusy = UpdaterInternalBusy();
+            if (external) {
+                updaterCountdown = -1;
+                SetUpdaterStatus(recovery ? UText("更新需要恢复 · 等待游戏 / 服务 / 采集空闲", "Update recovery needed · Waiting for game / services / capture") : UText("更新已下载 · 等待游戏 / 服务 / 采集空闲", "Downloaded · Waiting for game / services / capture to finish"));
+                return;
+            }
+            // A poll or short operation in flight: keep the countdown frozen for this tick.
+            if (internalBusy) return;
             if (updaterCountdown < 0) {
                 updaterWorking = true;
-                try { if (await ProbeUpdaterIdle(recovery) && UpdaterLocallyIdle() && UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) updaterCountdown = 10; }
+                try { if (await ProbeUpdaterIdle(recovery) && UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) updaterCountdown = 10; }
                 catch (Exception e) { UpdaterError(e); updaterPostpone = DateTime.UtcNow.AddMinutes(5); }
                 finally { updaterWorking = false; }
                 return;
             }
             SetUpdaterStatus((recovery ? UText("恢复更新 · 空闲重启倒计时 ", "Recover update · Restart while idle in ") : UText("更新已就绪 · 空闲重启倒计时 ", "Update ready · Restart while idle in ")) + updaterCountdown + UText(" 秒（可稍后）", "s (Later to defer)"));
-            if (updaterCountdown-- > 0) return;
+            int next = UpdaterCountdownStep(external, internalBusy, updaterCountdown);
+            if (next != 0) { updaterCountdown = next; return; }
             updaterWorking = true;
             try {
-                if (!await ProbeUpdaterIdle(recovery) || !UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) { updaterCountdown = -1; return; }
+                if (!await ProbeUpdaterIdle(recovery) || UpdaterExternalActivity() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) { updaterCountdown = -1; return; }
                 // Never trust or execute a URL or program from a download event. Only the installed, fixed helper is launched.
                 if (!recovery && !ValidUpdaterStage(backend.BaseDir, updaterVersion, UpdaterEdition, updaterStage)) throw new InvalidOperationException("Invalid update staging path");
                 string arguments = (recovery ? "launch-recover" : "launch") + " --root " + Backend.Quote(backend.BaseDir.TrimEnd('\\', '/')) +
@@ -193,7 +234,7 @@ namespace OverFieldLocal
                 // A raw CreateProcess(apply) followed by Close can lose that identity during Python imports.
                 var launch = await Task.Run(() => UpdaterNative.Start(backend.Python, Path.Combine(backend.BaseDir, "update_apply.py"), arguments, backend.BaseDir, UpdaterDirectory, true, 15000));
                 if (UpdaterValue(launch, "status") != "launched") throw new InvalidOperationException("Update handoff was not acknowledged");
-                if (!UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) {
+                if (UpdaterExternalActivity() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) {
                     // The waiting apply helper times out without killing us or applying while the parent lives.
                     updaterCountdown = -1; updaterPostpone = DateTime.UtcNow.AddMinutes(3); return;
                 }

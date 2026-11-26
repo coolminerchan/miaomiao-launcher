@@ -457,14 +457,27 @@ def recover_update(root, *, busy_finder=None):
         return {'status': 'error', 'reason': str(e)}
 
 
+def _launcher_exe(root):
+    """Return the launcher executable that actually exists in this install.
+
+    The portable package stores the international build as OverFieldLauncher.exe,
+    so it must never be assumed from the edition label.
+    """
+    for name in ('OverFieldLauncher.exe', 'OverFieldLauncher-EN.exe'):
+        path = root / name
+        if assert_no_reparse(path).is_file():
+            return path
+    return None
+
+
 def _restart_result(result, root, edition):
     try:
         journal_path = assert_no_reparse(root / 'runtime/updates/transaction/journal.json')
         if journal_path.exists() and _json(journal_path.read_bytes()).get('state') not in ('committed', 'rolled_back'):
             result['restart_error'] = 'unfinished transaction; manual recovery required'
             return result
-        exe = assert_no_reparse(root / ('OverFieldLauncher-EN.exe' if edition == 'EN' else 'OverFieldLauncher.exe'))
-        if not exe.is_file():
+        exe = _launcher_exe(root)
+        if exe is None:
             result['restart_error'] = 'same-edition launcher missing'
         else:
             subprocess.Popen([str(exe)], cwd=root, close_fds=True)
@@ -583,6 +596,28 @@ def apply_update(root, stage, edition, parent_pid=None, restart=False, *,
         return finish({'status': 'error', 'reason': str(e), 'transaction_started': journal_started})
 
 
+def _launcher_names(root):
+    """Both launcher file names are valid inside one installation root.
+
+    The portable package stores the international build as OverFieldLauncher.exe,
+    so requiring the -EN name for edition EN rejected every real EN install.
+    """
+    return {str(root / 'OverFieldLauncher.exe').lower(),
+            str(root / 'OverFieldLauncher-EN.exe').lower()}
+
+
+def _installed_edition(root):
+    """Read the edition from the installation baseline (read-only)."""
+    path = assert_no_reparse(root / 'installation-manifest.json')
+    if not path.is_file():
+        raise ValueError('installation baseline missing')
+    doc = _json(path.read_bytes())
+    edition = doc.get('edition')
+    if edition not in ('CN', 'EN'):
+        raise ValueError('invalid installation baseline edition')
+    return edition
+
+
 def launch_update(root, stage, edition, parent_pid, restart=False, *, verifier=None, busy_finder=None):
     """Detach helper without a shell; record parent identity before GUI exits."""
     try:
@@ -594,10 +629,10 @@ def launch_update(root, stage, edition, parent_pid, restart=False, *, verifier=N
             raise ValueError('invalid stage')
         rows = _processes()
         parent = next((r for r in rows if int(r['ProcessId']) == parent_pid), None)
-        expected = root / ('OverFieldLauncher-EN.exe' if edition == 'EN' else 'OverFieldLauncher.exe')
+        allowed = _launcher_names(root)
         if (parent is None or not parent.get('CreationDate') or
-                str(parent.get('ExecutablePath')).lower() != str(expected).lower()):
-            raise ValueError('parent identity is not same-edition installation launcher')
+                str(parent.get('ExecutablePath')).lower() not in allowed):
+            raise ValueError('parent identity is not this installation launcher')
         busy = (busy_finder or find_busy)(root, ignore_pids=(parent_pid,))
         if busy:
             return {'status': 'busy', 'details': busy}
@@ -647,12 +682,9 @@ def launch_recovery(root, parent_pid, restart=False, *, busy_finder=None):
         if parent is None or not parent.get('CreationDate'):
             raise ValueError('parent identity unavailable')
         path = str(parent.get('ExecutablePath')).lower()
-        if path == str(root / 'OverFieldLauncher.exe').lower():
-            edition = 'CN'
-        elif path == str(root / 'OverFieldLauncher-EN.exe').lower():
-            edition = 'EN'
-        else:
+        if path not in _launcher_names(root):
             raise ValueError('parent not installation launcher')
+        edition = _installed_edition(root)
         busy = (busy_finder or find_busy)(root, ignore_pids=(parent_pid,))
         if busy:
             return {'status': 'busy', 'details': busy}

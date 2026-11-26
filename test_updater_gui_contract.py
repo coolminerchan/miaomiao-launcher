@@ -36,6 +36,15 @@ class UpdaterContract {
   Need((bool)call("UpdaterActionAuthorized",new object[]{false,false,true,now,now.AddMinutes(-1)}),"Manual install blocked by pause");
   Need(!(bool)call("UpdaterActionAuthorized",new object[]{false,false,true,now,now.AddMinutes(1)}),"Later ignored for manual install");
   Need(!(bool)call("UpdaterActionAuthorized",new object[]{false,false,false,now,now.AddMinutes(-1)}),"Paused auto installed unattended");
+  // Countdown must survive our own 5s status poll and only stop for real user activity.
+  Func<string,object[],object> step=(name,values)=>t.GetMethod(name,flags).Invoke(null,values);
+  Need((int)step("UpdaterCountdownStep",new object[]{false,true,8})==8,"Status poll reset the countdown");
+  Need((int)step("UpdaterCountdownStep",new object[]{false,false,8})==7,"Countdown did not advance");
+  Need((int)step("UpdaterCountdownStep",new object[]{true,false,8})==-1,"External activity did not cancel");
+  Need((int)step("UpdaterCountdownStep",new object[]{false,false,1})==0,"Countdown did not reach zero");
+  Need((int)step("UpdaterCountdownStep",new object[]{true,true,8})==-1,"External activity overridden by internal busy");
+  int walked=10;for(int i=0;i<30 && walked>0;i++)walked=(int)step("UpdaterCountdownStep",new object[]{false,(i%5)==4,walked});
+  Need(walked==0,"Countdown pinned by the 5s status poll: "+walked);
   call("WriteUpdaterSettings",new object[]{root,false});
   string settings=Path.Combine(root,"runtime","updates","ui-settings.json");
   Need(!(bool)call("ParseUpdaterAutomatic",new object[]{File.ReadAllText(settings)}),"Pause lost");
