@@ -31,6 +31,11 @@ class UpdaterContract {
   Need(!(bool)call("UpdaterActionAuthorized",new object[]{true,false,false,now,now.AddMinutes(-1)}),"Paused recovery unauthorized");
   Need((bool)call("UpdaterActionAuthorized",new object[]{true,false,true,now,now.AddMinutes(-1)}),"Manual recovery rejected");
   Need(!(bool)call("UpdaterActionAuthorized",new object[]{true,true,true,now,now.AddMinutes(1)}),"Later ignored");
+  // A manual request must install a downloaded stage even while auto is paused,
+  // otherwise the payload sits in staging forever.
+  Need((bool)call("UpdaterActionAuthorized",new object[]{false,false,true,now,now.AddMinutes(-1)}),"Manual install blocked by pause");
+  Need(!(bool)call("UpdaterActionAuthorized",new object[]{false,false,true,now,now.AddMinutes(1)}),"Later ignored for manual install");
+  Need(!(bool)call("UpdaterActionAuthorized",new object[]{false,false,false,now,now.AddMinutes(-1)}),"Paused auto installed unattended");
   call("WriteUpdaterSettings",new object[]{root,false});
   string settings=Path.Combine(root,"runtime","updates","ui-settings.json");
   Need(!(bool)call("ParseUpdaterAutomatic",new object[]{File.ReadAllText(settings)}),"Pause lost");

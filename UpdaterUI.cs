@@ -20,7 +20,7 @@ namespace OverFieldLocal
         LinkLabel updaterCheck, updaterPause, updaterLater;
         System.Windows.Forms.Timer updaterTimer;
         bool updaterAllowed, updaterAutomatic = true, updaterWorking, updaterInitialized;
-        bool updaterRecoveryRequired, updaterRecoveryRequested;
+        bool updaterRecoveryRequired, updaterRecoveryRequested, updaterInstallRequested;
         DateTime updaterNextRecoveryProbe = DateTime.MinValue;
         string updaterStage, updaterVersion;
         DateTime updaterNextCheck = DateTime.MinValue, updaterPostpone = DateTime.MinValue;
@@ -90,8 +90,13 @@ namespace OverFieldLocal
                 Append(UText("更新设置读取失败，自动更新已暂停：", "Update settings unavailable; automatic updates paused: ") + Friendly.Describe(e, UText("读取更新设置", "Reading update settings")));
             }
             updaterPause.Text = updaterAutomatic ? UText("暂停自动", "Pause auto") : UText("恢复自动", "Resume auto");
-            SetUpdaterStatus(settingsError ? UText("更新设置损坏或不可读 · 已暂停自动更新", "Update settings invalid / unreadable · Auto updates paused") :
-                updaterAutomatic ? UText("自动更新 · 等待后台检查", "Auto update · Waiting for background check") : UText("自动更新已暂停", "Automatic updates paused"));
+            // A stage downloaded by an earlier session must still be installable after a
+            // restart; otherwise a paused launcher leaves the payload in staging forever.
+            string resumed = ResumeUpdaterStage();
+            string idle = updaterAutomatic ? UText("自动更新 · 等待后台检查", "Auto update · Waiting for background check")
+                                           : UText("自动更新已暂停", "Automatic updates paused");
+            if (resumed != null) idle = UText("已下载 " + resumed + " · 空闲后安装", "Downloaded " + resumed + " · installs when idle");
+            SetUpdaterStatus(settingsError ? UText("更新设置损坏或不可读 · 已暂停自动更新", "Update settings invalid / unreadable · Auto updates paused") : idle);
             updaterTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             updaterTimer.Tick += async delegate { await TickUpdater(); };
             Shown += delegate { updaterTimer.Start(); };
@@ -160,7 +165,8 @@ namespace OverFieldLocal
                 return;
             }
             bool recovery = updaterRecoveryRequired;
-            if (!UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested, DateTime.UtcNow, updaterPostpone)) return;
+            bool requested = updaterRecoveryRequested || updaterInstallRequested;
+            if (!UpdaterActionAuthorized(recovery, updaterAutomatic, requested, DateTime.UtcNow, updaterPostpone)) return;
             if (!recovery && updaterStage == null) {
                 if (DateTime.UtcNow >= updaterNextCheck) await CheckUpdater(false);
                 return;
@@ -169,7 +175,7 @@ namespace OverFieldLocal
             if (!UpdaterLocallyIdle()) { updaterCountdown = -1; SetUpdaterStatus(recovery ? UText("更新需要恢复 · 等待游戏 / 服务 / 采集空闲", "Update recovery needed · Waiting for game / services / capture") : UText("更新已下载 · 等待游戏 / 服务 / 采集空闲", "Downloaded · Waiting for game / services / capture to finish")); return; }
             if (updaterCountdown < 0) {
                 updaterWorking = true;
-                try { if (await ProbeUpdaterIdle(recovery) && UpdaterLocallyIdle() && UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested, DateTime.UtcNow, updaterPostpone)) updaterCountdown = 10; }
+                try { if (await ProbeUpdaterIdle(recovery) && UpdaterLocallyIdle() && UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) updaterCountdown = 10; }
                 catch (Exception e) { UpdaterError(e); updaterPostpone = DateTime.UtcNow.AddMinutes(5); }
                 finally { updaterWorking = false; }
                 return;
@@ -178,7 +184,7 @@ namespace OverFieldLocal
             if (updaterCountdown-- > 0) return;
             updaterWorking = true;
             try {
-                if (!await ProbeUpdaterIdle(recovery) || !UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested, DateTime.UtcNow, updaterPostpone)) { updaterCountdown = -1; return; }
+                if (!await ProbeUpdaterIdle(recovery) || !UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) { updaterCountdown = -1; return; }
                 // Never trust or execute a URL or program from a download event. Only the installed, fixed helper is launched.
                 if (!recovery && !ValidUpdaterStage(backend.BaseDir, updaterVersion, UpdaterEdition, updaterStage)) throw new InvalidOperationException("Invalid update staging path");
                 string arguments = (recovery ? "launch-recover" : "launch") + " --root " + Backend.Quote(backend.BaseDir.TrimEnd('\\', '/')) +
@@ -187,7 +193,7 @@ namespace OverFieldLocal
                 // A raw CreateProcess(apply) followed by Close can lose that identity during Python imports.
                 var launch = await Task.Run(() => UpdaterNative.Start(backend.Python, Path.Combine(backend.BaseDir, "update_apply.py"), arguments, backend.BaseDir, UpdaterDirectory, true, 15000));
                 if (UpdaterValue(launch, "status") != "launched") throw new InvalidOperationException("Update handoff was not acknowledged");
-                if (!UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested, DateTime.UtcNow, updaterPostpone)) {
+                if (!UpdaterLocallyIdle() || !UpdaterActionAuthorized(recovery, updaterAutomatic, updaterRecoveryRequested || updaterInstallRequested, DateTime.UtcNow, updaterPostpone)) {
                     // The waiting apply helper times out without killing us or applying while the parent lives.
                     updaterCountdown = -1; updaterPostpone = DateTime.UtcNow.AddMinutes(3); return;
                 }
@@ -214,6 +220,8 @@ namespace OverFieldLocal
                     string stage = UpdaterValue(result, "stage_dir"), nextVersion = UpdaterValue(result, "version");
                     if (!ValidUpdaterStage(backend.BaseDir, nextVersion, UpdaterEdition, stage)) throw new InvalidOperationException("Invalid update staging path");
                     updaterStage = Path.GetFullPath(stage); updaterVersion = nextVersion;
+                    // A manual check is an explicit request to install, even while paused.
+                    if (manual) updaterInstallRequested = true;
                     SetUpdaterStatus(UText("正式版已下载 · 等待空闲安全重启", "Stable release downloaded · Waiting for a safe idle restart"));
                 } else if (status == "up_to_date") SetUpdaterStatus(UText("已是最新正式版", "Latest stable release installed"));
                 else if (status == "deferred") SetUpdaterStatus(UText("更新检查已推迟 · 稍后可重试", "Update deferred · Retry later"));
@@ -221,9 +229,44 @@ namespace OverFieldLocal
             } catch (Exception e) { UpdaterError(e); updaterNextCheck = DateTime.UtcNow.AddMinutes(30); }
             finally { updaterWorking = false; if (!IsDisposed) updaterCheck.Enabled = updaterAllowed; }
         }
+        /// <summary>
+        /// Re-attach to a stage left by an earlier run. Returns its version, or null.
+        /// Only a complete, self-consistent stage with a valid signature folder is used;
+        /// the independent apply helper revalidates everything again before touching files.
+        /// </summary>
+        string ResumeUpdaterStage()
+        {
+            try {
+                string state = Path.Combine(UpdaterDirectory, "update-state.json");
+                if (!SafeUpdaterPath(state) || !File.Exists(state)) return null;
+                string text = File.ReadAllText(state);
+                if (text.Length > 8192) return null;
+                var data = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(text);
+                if (data == null || UpdaterValue(data, "status") != "downloaded") return null;
+                string version = UpdaterValue(data, "version"), edition = UpdaterValue(data, "edition");
+                string stage = UpdaterValue(data, "stage_dir");
+                if (edition != UpdaterEdition) return null;
+                if (!ValidUpdaterStage(backend.BaseDir, version, edition, stage)) return null;
+                string full = Path.GetFullPath(stage);
+                if (!File.Exists(Path.Combine(full, "payload.zip")) || !File.Exists(Path.Combine(full, "manifest.json")) ||
+                    !File.Exists(Path.Combine(full, "manifest.sig"))) return null;
+                var local = new Version(FileVersionInfo.GetVersionInfo(Assembly.GetExecutingAssembly().Location).FileVersion);
+                var target = new Version(version);
+                if (target <= local) return null;
+                updaterStage = full; updaterVersion = version;
+                // Resuming a downloaded stage is an explicit intent to install it.
+                updaterInstallRequested = true;
+                return version;
+            } catch { return null; }
+        }
         internal static bool UpdaterActionAuthorized(bool recovery, bool automatic, bool requested, DateTime now, DateTime postpone)
         {
-            return now >= postpone && (automatic || (recovery && requested));
+            // A paused launcher must never install on its own, but an explicit user
+            // request (manual "Check now" that downloaded a stage, or manual recovery)
+            // still has to be able to finish. Otherwise the download sits in staging
+            // forever and the strip keeps reporting the update as unavailable.
+            if (now < postpone) return false;
+            return automatic || requested;
         }
         async Task<Dictionary<string, object>> ReadUpdaterProbe()
         {
@@ -333,10 +376,15 @@ namespace OverFieldLocal
                 // Release our writable handles before File.ReadLines opens with FileShare.Read.
                 CloseHandle(output); output=IntPtr.Zero; CloseHandle(error); error=IntPtr.Zero;
                 // Bound parsing, ignore progress events; final status is the protocol result.
+                // Read with shared write access: the helper may still hold the log briefly
+                // after exiting, and an exclusive open would surface as "file in use".
                 if (new FileInfo(stdout).Length > 4*1024*1024) throw new InvalidDataException("Update event log too large: "+stdout);
                 Dictionary<string,object> final=null;
-                foreach (string line in File.ReadLines(stdout)) {
-                    try { var row=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line); if(row!=null && row.ContainsKey("status")) final=row; } catch (ArgumentException) { }
+                using (var reader = new StreamReader(new FileStream(stdout, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), Encoding.UTF8)) {
+                    string line;
+                    while ((line = reader.ReadLine()) != null) {
+                        try { var row=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line); if(row!=null && row.ContainsKey("status")) final=row; } catch (ArgumentException) { }
+                    }
                 }
                 if (final==null) throw new InvalidDataException("No update helper result; exit="+code+"; logs: "+stderr);
                 if (code!=0 && Convert.ToString(final["status"])!="busy" && Convert.ToString(final["status"])!="unknown" && Convert.ToString(final["status"])!="recovery_required" && Convert.ToString(final["status"])!="deferred") throw new InvalidDataException("Update helper failed; exit="+code+"; logs: "+stderr);
