@@ -134,5 +134,36 @@ class OwnSceneBackupTests(unittest.TestCase):
         self.assertEqual(row["room_decor"], 1)
 
 
+class AccountArchiveTests(unittest.TestCase):
+    """The garden must reach the ZIP the player actually opens."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.out = Path(self.temp.name)
+
+    def test_garden_and_scene_files_are_included(self):
+        (self.out / "gardens" / "777").mkdir(parents=True)
+        (self.out / "gardens" / "gardens_index.json").write_text("[]", encoding="utf-8")
+        (self.out / "gardens" / "777" / "x.json").write_text("{}", encoding="utf-8")
+        (self.out / "my-scenes").mkdir(parents=True)
+        (self.out / "my-scenes" / "index.json").write_text("{}", encoding="utf-8")
+        base = self.out / "summary.json"
+        base.write_text("{}", encoding="utf-8")
+
+        files = parse_pcap.account_archive_files(self.out, [base])
+        names = {p.relative_to(self.out).as_posix() for p in files}
+        self.assertIn("summary.json", names)
+        self.assertIn("gardens/gardens_index.json", names)
+        self.assertIn("gardens/777/x.json", names)
+        self.assertIn("my-scenes/index.json", names)
+
+    def test_missing_folders_are_not_an_error(self):
+        base = self.out / "summary.json"
+        base.write_text("{}", encoding="utf-8")
+        files = parse_pcap.account_archive_files(self.out, [base])
+        self.assertEqual([p.name for p in files], ["summary.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

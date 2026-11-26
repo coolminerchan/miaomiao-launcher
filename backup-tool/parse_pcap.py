@@ -285,6 +285,21 @@ def safe_player_name(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|\s\x00-\x1f]+', "_", name).strip("_.")[:40] or "未知玩家"
 
 
+def account_archive_files(out_dir: Path, base: Iterable[Path]) -> List[Path]:
+    """Everything the account ZIP should contain, including garden archives.
+
+    Gardens and own-channel scenes are written into their own subdirectories. They
+    must be collected explicitly: leaving them out made the checklist report the
+    garden as collected while the ZIP the user opens contained no garden at all.
+    """
+    files = list(base)
+    for folder in ("gardens", "my-scenes"):
+        directory = out_dir / folder
+        if directory.is_dir():
+            files.extend(sorted(path for path in directory.rglob("*") if path.is_file()))
+    return files
+
+
 def write_zip(path: Path, files: Iterable[Path]) -> None:
     with NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as temporary:
         temporary_path = Path(temporary.name)
@@ -672,8 +687,9 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         summary["account_zip"] = account_zip.name
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if account_uid is not None:
-        files = [summary_path, exploration_path, exploration_text_path,
-                 *sorted(raw_dir.glob("*.bin")), *sorted(json_dir.glob("*.json"))]
+        files = account_archive_files(out_dir, [
+            summary_path, exploration_path, exploration_text_path,
+            *sorted(raw_dir.glob("*.bin")), *sorted(json_dir.glob("*.json"))])
         write_zip(account_zip, files)
         print(f"已保存账号 ZIP {account_zip}")
 
