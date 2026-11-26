@@ -58,6 +58,9 @@ def snappy_declared_size(data: bytes) -> int:
     raise ValueError("invalid_snappy_length")
 
 HEADER_STRUCT = struct.Struct(">H")
+# TShark injects this ASCII notice into follow,tcp,raw output at a sequence gap.
+# It is a pseudo-byte line, not game payload.
+TCP_GAP_NOTICE = re.compile(rb"\[[0-9]+ bytes missing in capture file\]\x00?")
 GAME_PORTS = {"11001", "11002", "11003", "11004", "21001", "21002"}
 LOGIN_REQUEST_IDS = {1001, 1003, 2201}
 SCENE_DATA_NOTICE_ID = 1016
@@ -140,10 +143,12 @@ def list_tcp_streams(pcap_path: Path) -> List[int]:
     return streams
 
 
-def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str, str, bytes, bytes]:
-    """
-    通过 tshark -z follow,tcp,raw,<id> 精确提取重组后的双向字节流。
-    返回 (node0_addr, node1_addr, node0_to_node1_bytes, node1_to_node0_bytes)。
+def follow_tcp_stream(pcap_path: Path, stream_id: int) -> Tuple[str, str, bytes, bytes, List[int]]:
+    """Extract both directions and flag directions with a TShark-reported gap.
+
+    Bytes after a gap cannot be re-aligned safely: a partial frame before it
+    may otherwise join a later frame and silently hide data. Keep only the
+    exact prefix before the first gap; callers still relay the original file.
     """
     cmd = [TSHARK, "-n", "-r", str(pcap_path), "-q", "-z", f"follow,tcp,raw,{stream_id}"]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -152,8 +157,8 @@ def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str,
 
     node0 = ""
     node1 = ""
-    dir0_chunks: List[bytes] = []
-    dir1_chunks: List[bytes] = []
+    chunks: List[List[bytes]] = [[], []]
+    gap_directions: List[int] = []
 
     in_body = False
     for raw_line in res.stdout.splitlines():
@@ -171,18 +176,31 @@ def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str,
             break
         if not line:
             continue
-        # tshark follow,tcp,raw 约定：无前导制表符为 Node0 -> Node1，带前导 '\t' 为 Node1 -> Node0
-        is_from_node1 = line.startswith("\t")
+        # tab-prefixed lines are Node1 -> Node0; absent tab means Node0 -> Node1
+        direction = int(line.startswith("\t"))
+        if direction in gap_directions:
+            continue
         hex_str = line.strip()
         if not re.fullmatch(r"[0-9a-fA-F]+", hex_str) or len(hex_str) % 2 != 0:
             continue
         chunk = bytes.fromhex(hex_str)
-        if is_from_node1:
-            dir1_chunks.append(chunk)
-        else:
-            dir0_chunks.append(chunk)
+        notice = TCP_GAP_NOTICE.search(chunk)
+        if notice:
+            # Normally TShark puts the notice on its own line, but keep any
+            # genuine prefix if a localized/combined line ever carries both.
+            if notice.start() > 0:
+                chunks[direction].append(chunk[:notice.start()])
+            gap_directions.append(direction)
+            continue
+        chunks[direction].append(chunk)
 
-    return node0, node1, b"".join(dir0_chunks), b"".join(dir1_chunks)
+    return node0, node1, b"".join(chunks[0]), b"".join(chunks[1]), gap_directions
+
+
+def extract_tcp_stream_directions(pcap_path: Path, stream_id: int) -> Tuple[str, str, bytes, bytes]:
+    """Compatibility wrapper: legacy callers receive the gap-safe prefix."""
+    node0, node1, b01, b10, _ = follow_tcp_stream(pcap_path, stream_id)
+    return node0, node1, b01, b10
 
 
 def parse_game_stream(data: bytes) -> Tuple[List[dict], int]:
@@ -389,8 +407,8 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
     garden_packets: dict[int, list[str]] = defaultdict(list)
 
     for sid in streams:
-        node0, node1, b01, b10 = extract_tcp_stream_directions(pcap_path, sid)
-        if not b01 and not b10:
+        node0, node1, b01, b10, gap_indexes = follow_tcp_stream(pcap_path, sid)
+        if not b01 and not b10 and not gap_indexes:
             continue
 
         # 判断哪个方向是 s2c（通常服务端端口是 11003 / 21001 等，或非内网 IP）
@@ -408,13 +426,19 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
             directions = pick_directions(b01, b10)
 
         stream_pkt_total = 0
-        for dir_label, payload in directions:
+        for index, (dir_label, payload) in enumerate(directions):
+            tcp_gap = index in gap_indexes
+            if tcp_gap:
+                # Log the gap even when no frame survives before it.
+                trailing_streams.append({"stream_id": sid, "direction": dir_label,
+                                         "remaining_bytes": 0, "tcp_gap": True,
+                                         "reason": "tcp_sequence_gap"})
             if not payload:
                 continue
             pkts, remaining = parse_game_stream(payload)
             if remaining:
                 trailing_streams.append({"stream_id": sid, "direction": dir_label,
-                                         "remaining_bytes": remaining,
+                                         "remaining_bytes": remaining, "tcp_gap": tcp_gap,
                                          "reason": "incomplete_or_unrecognized_tail"})
             if not pkts:
                 continue
@@ -529,6 +553,8 @@ def analyze_pcap(pcap_path: Path, out_dir: Path) -> None:
         "successful_s2c_message_counts": dict(decoded_s2c_names_seen),
         "trailing_streams": trailing_streams,
         "trailing_bytes_count": sum(row["remaining_bytes"] for row in trailing_streams),
+        "tcp_gap_streams": [row for row in trailing_streams if row.get("tcp_gap")],
+        "tcp_gap_count": sum(1 for row in trailing_streams if row.get("tcp_gap")),
         "decompression_budget": {"per_body_bytes": MAX_DECOMPRESSED_BODY,
                                  "per_direction_stream_bytes": MAX_STREAM_DECOMPRESSED},
         "pcap_file": str(pcap_path),

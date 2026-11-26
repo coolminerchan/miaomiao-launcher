@@ -15,13 +15,13 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 #if ENGLISH
-[assembly: System.Reflection.AssemblyFileVersion("1.4.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.4.2")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.3")]
 [assembly: System.Reflection.AssemblyTitle("OverField International Launcher")]
 [assembly: System.Reflection.AssemblyProduct("OverField International Launcher")]
 #else
-[assembly: System.Reflection.AssemblyFileVersion("1.4.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.4.2")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.3")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 #endif
@@ -640,11 +640,14 @@ namespace OverFieldLocal
                         return;
                     }
                     lastCaptureZip = zip;
+                    bool captureIncomplete=false;
                     if(captured.ContainsKey("quality")) {
                         var quality=captured["quality"] as Dictionary<string,object>;
                         if(quality!=null && quality.ContainsKey("successful_decode_count")) Append(Loc.S("成功解码响应/消息数：")+Convert.ToString(quality["successful_decode_count"]));
                         if(quality!=null && quality.ContainsKey("trailing_bytes_count") && Convert.ToInt64(quality["trailing_bytes_count"])>0) Append(Loc.S("发现残缺流尾；请查看采集报告，不能视为完整备份。"));
+                        if(quality!=null && quality.ContainsKey("tcp_gap_count") && Convert.ToInt64(quality["tcp_gap_count"])>0) { captureIncomplete=true; Append(Loc.S("检测到抓包缺口或未解码数据，备份可能不完整。")); }
                     }
+                    if(captureIncomplete) captureHint.Text=Loc.S("检测到抓包缺口或未解码数据，备份可能不完整。");
                     if(captured.ContainsKey("exploration")) {
                         var exploration=captured["exploration"] as Dictionary<string,object>;
                         if(exploration!=null) Append(exploration.ContainsKey("evidence_available") && Convert.ToBoolean(exploration["evidence_available"])

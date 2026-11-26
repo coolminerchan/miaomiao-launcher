@@ -32,6 +32,7 @@ namespace OverFieldLocal
             { "未启动管理员实例，请重试。", "Administrator instance did not start. Please retry." },
             { "成功解码响应/消息数：", "Successfully decoded messages: " },
             { "发现残缺流尾；请查看采集报告，不能视为完整备份。", "Incomplete stream tails detected. Check the report; this is not a complete backup." },
+            { "检测到抓包缺口或未解码数据，备份可能不完整。", "A capture gap or undecoded data was found. The backup may be incomplete." },
             { "探索观测报告已加入账号ZIP；总量未验证，不表示全图完整。", "Exploration evidence is included in the ZIP. Totals are unverified; it is not a complete map snapshot." },
             { "探索报告已生成，但尚未收到有效探索证据；未知不当0。", "Exploration report generated, but no valid evidence was received. Unknown is not zero." },
             { "采集项目清单 · 1.0.12增强集成 · 实时/最终核对", "Capture checklist · 1.0.12 integration · live/final checks" },

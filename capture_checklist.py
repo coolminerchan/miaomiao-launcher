@@ -107,8 +107,13 @@ def final_report(export):
     summary=export/'summary.json'
     if summary.is_file():
         try:
-            if len(json.loads(summary.read_text(encoding='utf-8-sig')).get('player_uids',[]))>1:
-                warning='本次流量包含多个账号，清单仅表示本次见过这些响应；不能作为单账号完整备份，请按账号分别采集。'
+            metadata=json.loads(summary.read_text(encoding='utf-8-sig'))
+            warnings=[]
+            if len(metadata.get('player_uids',[]))>1:
+                warnings.append('本次流量包含多个账号，清单仅表示本次见过这些响应；不能作为单账号完整备份，请按账号分别采集。')
+            if metadata.get('tcp_gap_count') or metadata.get('trailing_bytes_count'):
+                warnings.append('检测到抓包缺口或未解码数据，备份可能不完整。')
+            warning=' '.join(warnings)
         except (OSError,ValueError,TypeError):pass
     return report(counts,empty,phase='complete',readable=True,warning=warning)
 

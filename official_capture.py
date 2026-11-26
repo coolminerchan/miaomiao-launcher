@@ -296,7 +296,9 @@ def result_from_export(export: Path, session: Path):
                 raise ValueError("探索报告不能链接到输出目录之外。")
             result["explorationReport"] = str(report_path)
     result["quality"] = {key: summary[key] for key in (
-        "successful_decode_count", "trailing_bytes_count", "decode_fallback_count") if key in summary}
+        "successful_decode_count", "trailing_bytes_count", "tcp_gap_count",
+        "decode_fallback_count") if key in summary}
+    result["incompleteStreams"] = int(summary.get("tcp_gap_count") or 0)
     return result
 
 
