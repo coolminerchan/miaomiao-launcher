@@ -22,7 +22,7 @@ ALLOWED = {
     'docs/login-and-data.md', 'docs/release-audit.md', 'docs/channel-login.md', 'preflight.py',
     'backup-tool/1_backup_account.cmd', 'backup-tool/2_backup_gardens.cmd',
     'backup-tool/3_decode_pcap.cmd', 'backup-tool/capture.ps1',
-    'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py', 'backup-tool/collector_preflight.py', 'backup-tool/exploration.py', 'backup-tool/exploration_catalog.json', 'backup-tool/test_exploration_integration.py', 'backup-tool/test_tcp_gap.py',
+    'backup-tool/parse_pcap.py', 'backup-tool/extract_gardens.py', 'backup-tool/collector_preflight.py', 'backup-tool/exploration.py', 'backup-tool/exploration_catalog.json', 'backup-tool/test_exploration_integration.py', 'backup-tool/test_tcp_gap.py', 'backup-tool/test_scene_backup.py',
     'backup-tool/README.md', 'backup-tool/requirements.txt',
     'backup-tool/THIRD-PARTY.txt', 'backup-tool/使用说明.txt',
     'backup-tool/VERSION', 'backup-tool/RELEASE-NOTES.txt', 'backup-tool/pcap_compat.py',

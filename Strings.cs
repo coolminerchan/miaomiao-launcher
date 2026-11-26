@@ -319,6 +319,8 @@ namespace OverFieldLocal
             { "需要检查配置", "Needs a configuration check" },
             { "项目", "Item" },
             { "项目状态暂不可读：", "Item status is unreadable for now: " },
+            { "已保存自己频道的场景备份：", "Own-channel scene backups saved: " },
+            { " 个，见 my-scenes 目录；他人频道不纳入。", " in the my-scenes folder. Other players' channels are excluded." },
             { "操作", "The operation" },
             { "无法完成", "Could not complete " },
             { "需要管理员权限；请右键以管理员身份运行后重试。", "Administrator rights are required. Right-click the launcher and choose Run as administrator." },

@@ -15,13 +15,13 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 #if ENGLISH
-[assembly: System.Reflection.AssemblyFileVersion("1.4.4.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.4.4")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.5.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.5")]
 [assembly: System.Reflection.AssemblyTitle("OverField International Launcher")]
 [assembly: System.Reflection.AssemblyProduct("OverField International Launcher")]
 #else
-[assembly: System.Reflection.AssemblyFileVersion("1.4.4.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.4.4")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.5.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.5")]
 [assembly: System.Reflection.AssemblyTitle("开放空间私服启动器")]
 [assembly: System.Reflection.AssemblyProduct("开放空间私服启动器")]
 #endif
@@ -648,6 +648,11 @@ namespace OverFieldLocal
                         if(quality!=null && quality.ContainsKey("tcp_gap_count") && Convert.ToInt64(quality["tcp_gap_count"])>0) { captureIncomplete=true; Append(Loc.S("检测到抓包缺口或未解码数据，备份可能不完整。")); }
                     }
                     if(captureIncomplete) captureHint.Text=Loc.S("检测到抓包缺口或未解码数据，备份可能不完整。");
+                    if(captured.ContainsKey("myScenes")) {
+                        var scenes=captured["myScenes"] as Dictionary<string,object>;
+                        int sceneCount=scenes!=null && scenes.ContainsKey("sceneCount") ? Convert.ToInt32(scenes["sceneCount"]) : 0;
+                        if(sceneCount>0) Append(Loc.S("已保存自己频道的场景备份：")+sceneCount+Loc.S(" 个，见 my-scenes 目录；他人频道不纳入。"));
+                    }
                     if(captured.ContainsKey("exploration")) {
                         var exploration=captured["exploration"] as Dictionary<string,object>;
                         if(exploration!=null) Append(exploration.ContainsKey("evidence_available") && Convert.ToBoolean(exploration["evidence_available"])
